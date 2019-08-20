@@ -2,6 +2,12 @@
 
 Continuously Jams all the Devices In the Area. Start. It will continue on scanning the nearby Wireless networks and sending Deauthentication Packets.
 
+## Installation:
+Use Python version `2.7` and install scapy:
+```
+pip install scapy
+```
+
 ## Usage:
 ```
 python [scriptname] [argument...]
