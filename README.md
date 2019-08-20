@@ -6,6 +6,9 @@ Continuously Jams all the Devices In the Area. Start. It will continue on scanni
 Use Python version `2.7` and install scapy:
 ```
 pip install scapy
+git clone https://github.com/hash3liZer/WiFiJammer.py.git
+cd WiFiJammer.py/
+python wifijammer.py --help
 ```
 
 ## Usage:
