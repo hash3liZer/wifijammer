@@ -61,6 +61,15 @@ class JAMMER:
 
 		return pkt
 
+	def get_ess(self, sn, rc):
+		ess = ''
+		for key in self.__ACCESSPOINTS:
+			if key.get("bssid") == sn or key.get("bssid") == rc:
+				ess = key['essid']
+				break
+
+		return ess
+
 	def send(self, sender, receiver):
 		pkts = (
 			self.forge(sender, receiver),
@@ -74,15 +83,18 @@ class JAMMER:
 				count=self.packets,
 				verbose=False
 			)
-			pull.print("*",
-				"Sent Deauths Count [{count}] Code [{code}] {sender} -> {receiver} ".format(
-					count=self.packets,
-					code =self.code,
-					sender=sender.upper(),
-					receiver=receiver.upper()
-				),
-				pull.YELLOW
-			)
+			
+		essid = self.get_ess(sender, receiver)
+		pull.print("*",
+			"Sent Deauths Count [{count}] Code [{code}] {sender} -> {receiver} ({essid})".format(
+				count=pull.RED+str(self.packets)+pull.END,
+				code =pull.GREEN+str(self.code)+pull.END,
+				sender=pull.DARKCYAN+sender.upper().replace(":", "")+pull.END,
+				receiver=pull.DARKCYAN+receiver.upper().replace(":", "")+pull.END,
+				essid=essid
+			),
+			pull.YELLOW
+		)
 
 	def deauthenticate(self, sender, receiver):
 		if self.aps and self.stations and self.filters:
@@ -137,12 +149,12 @@ class JAMMER:
 		if pkt.haslayer(Dot11Beacon):
 			macaddr = pkt.getlayer(Dot11FCS).addr2
 			essid   = self.extract_essid(pkt.getlayer(Dot11Elt))
-			#self.__ACCESSPOINTS.add(
-			#		{
-			#			'bssid': macaddr,
-			#			'essid': essid
-			#		}
-			#	)
+			self.__ACCESSPOINTS.add(
+					{
+						'bssid': macaddr,
+						'essid': essid
+					}
+				)
 		elif pkt.haslayer(Dot11FCS) and pkt.getlayer(Dot11FCS).type == 2:
 			sender   = pkt.getlayer(Dot11FCS).addr2
 			receiver = pkt.getlayer(Dot11FCS).addr1
