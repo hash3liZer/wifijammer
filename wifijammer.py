@@ -12,6 +12,10 @@ import re
 
 from pull import PULL
 from scapy.sendrecv import sniff
+from scapy.layers.dot11 import Dot11Beacon
+from scapy.layers.dot11 import Dot11
+from scapy.layers.dot11 import Dot11Elt
+from scapy.layers.eap   import EAPOL
 
 def getNICnames():
 	ifaces = []
@@ -212,6 +216,8 @@ def macMass(bssid):
 
 class JAMMER:
 
+	__ACCESSPOINTS = set()
+
 	def __init__(self, prs):
 		self.interface = prs.interface
 		self.channel   = prs.channel
@@ -224,8 +230,27 @@ class JAMMER:
 		self.packets   = prs.packets
 		self.verbose   = prs.verbose
 
+	def extract_essid(self, layers):
+		essid = ''
+		counter = 1
+		layer = layers.getlayer(Dot11Elt, counter)
+		while layer:
+			if hasattr(layer, "ID") and layer.ID == 0:
+				essid = layer.info
+				break
+			else:
+				counter += 1
+
+		return essid
+
 	def injector(self, pkt):
-		return
+		if pkt.haslayer(Dot11Beacon):
+			macaddr = pkt.getlayer(Dot11).addr2
+			essid   = self.extract_essid(pkt.getlayer(Dot11Elt))
+			self.__ACCESSPOINTS.add(
+					macaddr
+				)
+		elif pkt.haslayer(Dot11) and pkt.getlayer(Dot11).type == long(2) and not pkt.haslayer(EAPOL):
 
 	def engage(self):
 		sniff(iface=self.interface, prn=self.injector)
