@@ -1,45 +1,8 @@
 #!/usr/bin/python
-# Author: Maximus
-# Description: Send Deauthentication packets to all nearby Devices that have the capabaility of transfering signals via Air. 
-
-__doc__ = '''
-Documentation:::
-Name: WiFiJammer.py
-Description: Continuously Jams all the Devices In the Area. Start The script and take Your Device anywhere you want
-
-Usage:
-python [scriptname] [argument...]
-python wifijammer.py --all
-
--a, --ap=	BSSID of Target AP
--c, --client=	BSSID of Client (Requires Access Point Mac Address)
--h, --help	This Help Manual
--o, --out=	comma-seperated BSSID's which you don't want to send Deauth Packets
--a, --all	Sent Deauth Packets to all nearby Devices.
-
-Examples:
-
-python wifijammer.py --all
-[!] This will send deauth packets to all nearby WiFi Networks. Even Hidden Networks
-
-python wifijammer.py -a FF:FF:FF:FF:FF:FF
-[!] This will send deauth packets to only a specific Target Acess Point
-
-python wifijammer.py -a FF:FF:FF:FF:FF:FF -c FF:FF:FF:FF:FF:FF
-[!] This will send deauth packets to a specific client of a specific Access Point
-
-python wifijammer.py --all --out=FF:FF:FF:FF:FF:FF,BB:BB:BB:BB:BB:BB:BB
-[!] This will send deauth packets to all nearby devices other than FF:FF:FF:FF:FF:FF and BB:BB:BB:BB:BB:BB
-'''
+#Author: @hash3liZer
 
 import sys
-import pkgutil as pkg
-pk = pkg.find_loader('scapy')
-if not pk:
-	sys.exit('Scapy Not Found. Try "python jammer.py install"')
-else:
-	from scapy.all import *
-from getopt import getopt, GetoptError
+import argparse
 import threading
 import os
 import time
@@ -47,28 +10,8 @@ import signal
 import subprocess
 import re
 
-interface = "" 
-list_ = []
-run_list = []
-out_ = []
-iwc = False
-arc = False
-sca = False
-
-
-allc_ = 0
-ap_ = ""
-cl_ = ""
-
-W  = '\033[0m'
-R  = '\033[31m'
-G  = '\033[32m'
-O  = '\033[33m'
-B  = '\033[34m'
-P  = '\033[35m'
-C  = '\033[36m'
-GR = '\033[37m'
-T  = '\033[93m'
+from pull import PULL
+from scapy.sendrecv import sniff
 
 def getNICnames():
 	ifaces = []
@@ -267,36 +210,192 @@ def macMass(bssid):
 	else:
 		return False
 
-if __name__ == "__main__":
-	signal.signal(signal.SIGINT, sig_handle)
-	for n in range(5):
-		print("Starting" + "." * n)
-   		sys.stdout.write("\033[F")
-    		time.sleep(1)
-	main()
-	ifaceCard()
-	monMode(interface)
-	if allc_ is 1:	
-		accumu = threading.Thread(target=sniffDat)
-		accumu.daemon = True
-		accumu.start()
-		while True:
-			collectDev()
-	elif ap_ != '':
-		if cl_ != '':
-			if macMass(ap_) and macMass(cl_):
-				apDeauth(ap_, cl_)
+class JAMMER:
+
+	def __init__(self, prs):
+		self.interface = prs.interface
+		self.channel   = prs.channel
+		self.essids    = prs.essids
+		self.aps       = prs.aps
+		self.stations  = prs.stations
+		self.filters   = prs.filters
+		self.code      = prs.code
+		self.delay     = prs.delay
+		self.packets   = prs.packets
+		self.verbose   = prs.verbose
+
+	def injector(self, pkt):
+		return
+
+	def engage(self):
+		sniff(iface=self.interface, prn=self.injector)
+
+class PARSER:
+
+	def __init__(self, opts):
+		self.help = self.help(opts.help)
+		self.interface = self.interface(opts.interface)
+		self.channel   = self.channel(opts.channel)
+		self.essids    = self.essids(opts.essids)
+		self.aps       = self.aps(opts.aps)
+		self.stations  = self.stations(opts.stations)
+		self.filters   = self.filters(opts.filter)
+		self.code      = opts.code if (opts.code >= 1 and opts.code <= 66) else pull.halt("Invalid Reason Code", True, pull.RED)
+		self.delay     = opts.delay if opts.delay >= 0 else pull.halt("Invalid Delay Between Requests", True, pull.RED)
+		self.packets   = opts.packets if opts.packets > 0 else pull.halt("Packets Must Be greater than 0", True, pull.RED)
+		self.verbose   = opts.verbose
+		self.signal    = signal.signal(self.handler, signal.SIGINT)
+
+	def handler(self, sig, fr):
+		pull.halt(
+				"CTRL+C Received. Exiting", 
+				True,
+				"\r",
+				pull.RED
+			)
+
+	def help(self, hl):
+		if hl:
+			pull.help()
+
+	def channel(self, ch):
+		chs = tuple(range(1,15))
+		if ch:
+			if ch in chs:
+				return ch
 			else:
-				sys.exit('Make Sure of Your Arguments')
-		elif cl_ == '':
-			if macMass(ap_):
-				apDeauth(ap_)
-			else:
-				sys.exit('Make Sure of Your Arguments')
+				pull.halt("Not a Valid Channel. Choose in between 1-14.", True, pull.RED)
 		else:
-			sys.exit('Nothing Found Here')
-	else:
-		monModeOff(interface)
-		help()
+			return chs
+
+	def essids(self, essids):
+		retval = []
+		if essids:
+			essids = essids.split(",")
+			for essid in essids:
+				retval.append(essid)
+		else:
+			return []
+
+	def aps(self, aps):
+		retval = []
+		if aps:
+			aps = aps.split(",")
+			for ap in aps:
+				ap = ap.upper()
+				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", ap):
+					retval.append(ap)
+				else:
+					pull.halt("Not a Valid BSSID [%s]" % ap, True, pull.RED)
+		else:
+			return retval
+
+	def stations(self, sts):
+		retval = []
+		if sts:
+			sts = sts.split(",")
+			for st in sts:
+				st = st.upper()
+				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", st):
+					retval.append(st)
+				else:
+					pull.halt("Not a Valid MAC Address [%s]" % st, True, pull.RED)
+		else:
+			return retval
+
+	def filters(self, fts):
+		retval = []
+		if fts:
+			fts = fts.split(",")
+			for ft in fts:
+				ft = ft.upper()
+				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", ft):
+					retval.append(ft)
+				else:
+					pull.halt("Not a Valid MAC Address [%s]" % ft, True, pull.RED)
+		else:
+			return retval
+
+	def interface(self, iface):
+		def getNICnames():
+			ifaces = []
+			dev = open('/proc/net/dev', 'r')
+			data = dev.read()
+			for n in re.findall('[a-zA-Z0-9]+:', data):
+			ifaces.append(n.rstrip(":"))
+			return ifaces
+
+		def confirmMon(iface):
+			co = subprocess.Popen(['iwconfig', iface], stdout=subprocess.PIPE)
+			data = co.communicate()[0]
+			card = re.findall('Mode:[A-Za-z]+', data)[0]	
+			if "Monitor" in card:
+				return True
+			else:
+				return False
+
+		ifaces = getNICnames()
+		if iface in ifaces:
+			if confirmMon(iface):
+				return iface
+			else:
+				pull.halt("Interface Not in Monitor Mode [%s]" % iface, True, pull.RED) 
+		else:
+			pull.halt("No Such Interface [%s]" % iface, True, pull.RED)
+
+
+def main():
+	parser = argparse.ArgumentParser( add_help=False )
+
+	parser.add_argument('-h', '--help', dest="help", default=False, action="store_true")
+	parser.add_argument('-i', '--interface', dest="interface", default="", type=str)
+	parser.add_argument('-c', '--channel'  , dest="channel"  , default=0 , type=int)
+	parser.add_argument('-e', '-essids'    , dest="essids"   , default="", type=str)
+	parser.add_argument('-a', '--access-points', dest="aps"  , default="", type=str)
+	parser.add_argument('-s', '--stations' , dest="stations" , default="", type=str)
+	parser.add_argument('-f', '--filters'  , dest="filters"  , default="", type=str)
+	parser.add_argument('--code'           , dest="code"     , default=7 , type=int)
+	parser.add_argument('--delay'          , dest="delay"    , default=0 , type=int)
+	parser.add_argument('--packets'        , dest="packets"  , default=64, type=int)
+	parser.add_argument('--verbose'        , dest="verbose"  , default=False, action="store_true")
+
+	options = parser.parse_args()
+	parser  = PARSER(options)
+
+	pull.print(
+		"*",
+		"IFACE [{iface}] ESSIDS [{essids}] CH [{channel}]".format(
+			iface=parser.interface,
+			essids=len(parser.essids),
+			channel=("Hop" if type(parser.channel) == list else parser.channel)
+		),
+		pull.YELLOW
+	)
+	pull.print(
+		"*",
+		"APS [{bssids}] STS [{sts}] CODE [{code}]".format(
+			bssids=len(parser.aps),
+			sts   =len(parser.stations),
+			code  =parser.code,
+		),
+		pull.RED
+	)
+	pull.print(
+		"*",
+		"FILTERS [{filters}] STS [{delay}] CODE [{packets}]".format(
+			filters=len(parser.filters),
+			delay  =parser.delay,
+			packets=parser.packets,
+		),
+		pull.GREEN
+	)
+
+	pull.print("^", "Engaging Now. Starting Jammer. ", pull.DARKCYAN)
+	jammer = JAMMER(parser)
+	jammer.engage()
+
+if __name__ == "__main__":
+	pull = PULL()
+	main()
 		
 	
