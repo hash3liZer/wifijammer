@@ -1,52 +1,40 @@
-# WiFiJammer.py
+# wifijammer
 
-Continuously Jams all the Devices In the Area. Start. It will continue on scanning the nearby Wireless networks and sending Deauthentication Packets.
+A wireless jammer that send deauthentication frames to dissociate access point and station. Built on scapy and works with Python 3. The jamming will heavily depend on your what kind of wireless adapter you are using. 
 
 ## Installation:
-Use Python version `2.7` and install scapy:
+Install Scapy: 
 ```
-pip install scapy
-git clone https://github.com/hash3liZer/WiFiJammer.py.git
-cd WiFiJammer.py/
-python wifijammer.py --help
+$ pip install scapy==2.4.3
+```
+Clone the Repo and check manual: 
+```
+$ git clone https://github.com/hash3liZer/wifijammer.git
+$ cd wifijammer/
+$ python wifijammer.py --help
 ```
 
 ## Usage:
 ```
 python [scriptname] [argument...]
-python wifijammer.py --all
+python wifijammer.py --help
 ```
 
 ### Arguments
 ```
--a, --ap=	BSSID of Target AP
--c, --client=	BSSID of Client (Requires Access Point Mac Address)
--h, --help	This Help Manual
--o, --out=	comma-seperated BSSID's which you don't want to send Deauth Packets
--a, --all	Sent Deauth Packets to all nearby Devices.
-```
-
-## Examples:
-
-Send Deauth packets to all nearby WiFi Networks. Even Hidden Networks.
-```
-python wifijammer.py --all
-```
-Send Deauth packets to only a specific Target Acess Point
+Args                  Description                       Default
+ -h, --help           Throwback this help manaul        False
+ -i, --interface      Monitor Mode Interface to use.    None  
+ -c, --channel        Channel on which to send          Hopping
+                      deauthentication frames
+ -e, --essids         Essids to Jam                     None
+ -a, --access-points  Mac of Access Points to Jam       None
+ -s, --stations       Mac of Stations to Jam            None
+ -f, --filters        List of Mac addresses to not Jam. None
+     --verbose        Print Verbose Messages.           False
 
 ```
-python wifijammer.py -a FF:FF:FF:FF:FF:FF
-```
 
-Send Deauth packets to a specific client of a specific Access Point
-```
-python wifijammer.py -a FF:FF:FF:FF:FF:FF -c FF:FF:FF:FF:FF:FF
-```
-Send Deauth packets to all nearby devices other than FF:FF:FF:FF:FF:FF and BB:BB:BB:BB:BB:BB
-```
-python wifijammer.py --all --out=FF:FF:FF:FF:FF:FF,BB:BB:BB:BB:BB:BB:BB
-```
-
-### Credits
+### Author
 Twitter: <a href="//twitter.com/hash3liZer">hash3liZer</a><br>
 Email  : <a href="mailto:admin@shellvoide.com">admin@shellvoide.com</a>
