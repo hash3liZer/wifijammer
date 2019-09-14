@@ -25,8 +25,10 @@ from scapy.layers.eap   import EAPOL
 class JAMMER:
 
 	__ACCESSPOINTS = []
+	__DECLIST      = []
 
 	BROADCAST      = 'ff:ff:ff:ff:ff:ff'
+	CHANNELLOCK    = False
 	EXCEPTION      = ['ff:ff:ff:ff:ff:ff', '00:00:00:00:00:00', '33:33:00:', '33:33:ff:', '01:80:c2:00:00:00', '01:00:5e:']
 
 	def __init__(self, prs):
@@ -103,13 +105,12 @@ class JAMMER:
 
 		return pkt
 
-	def jam(self, pkt, contra=False):
+	def jam(self, pkt):
 		sendp(
 			pkt,
 			iface=self.interface,
 			inter=self.delay,
 			count=self.packets,
-			loop=(1 if contra else 0),
 			verbose=False
 		)
 
@@ -228,6 +229,12 @@ class JAMMER:
 					else:
 						self.deauthenticate(sender, receiver)
 
+	def runner(self):
+		while True:
+			if self.__DECLIST:
+				pkts = self.__DECLIST[0]
+				del self.__DECLIST[0]
+
 	def hopper(self, chs):
 		if type(chs) == tuple:
 			ch = random.choice(chs)
@@ -244,6 +251,10 @@ class JAMMER:
 
 	def engage(self):
 		t = threading.Thread(target=self.hopper, args=(self.channel,))
+		t.daemon = True
+		t.start()
+
+		t = threading.Thread(target=self.runner)
 		t.daemon = True
 		t.start()
 
