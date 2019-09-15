@@ -200,6 +200,14 @@ def main():
 		pull.DARKCYAN
 	)
 
+	pull.print(
+		"^",
+		"Engaing With Jammer Now",
+		pull.GREEN
+	)
+
+	jammer = JAMMER(parser)
+
 if __name__ == "__main__":
 	pull = PULL()
 	main()
