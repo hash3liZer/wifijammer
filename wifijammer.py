@@ -99,7 +99,7 @@ class JAMMER:
 		ch = 0
 
 		for ap in self.__ACCESSPOINTS:
-			if ap.get('bssid') == ap:
+			if ap.get('bssid') == bss:
 				ch = ap.get('channel')
 				break
 
@@ -140,7 +140,15 @@ class JAMMER:
 			return True
 
 	def get_crate(self, ch):
-		return
+		retval = []
+
+		for connection in self.__DECPACKETS:
+			channel = connection.get('channel')
+
+			if channel == ch:
+				retval.append(connection)
+
+		return retval
 
 	def filtertify(self, ap, sta):
 		if self.invalid(sta):
@@ -204,6 +212,12 @@ class JAMMER:
 			time.sleep(0.5)
 
 			crate = self.get_crate(ch)
+			for connection in crate:
+				ap = connection.get( 'ap' )
+				sta = connection.get( 'sta' )
+				channel = connection.get( 'channel' )
+
+				#pkts = self.forge(ap, sta)
 
 			time.sleep(0.5)
 
