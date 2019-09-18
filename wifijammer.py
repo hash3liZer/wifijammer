@@ -24,6 +24,10 @@ from scapy.layers.eap   import EAPOL
 
 class JAMMER:
 
+	__ACCESSPOINTS = []
+	__EXECUTED     = []
+	__DECPACKETS   = []
+
 	def __init__(self, prs):
 		self.verbose    = prs.verbose
 		self.exceptions = prs.exceptions
@@ -41,6 +45,121 @@ class JAMMER:
 		self.reset      = prs.reset
 		self.code       = prs.code
 
+	def extract_essid(self, layers):
+		retval = ''
+		counter = 0
+
+		try:
+			while True:
+				layer = layers[counter]
+				if hasattr(layer, "ID") and layer.ID == 0:
+					retval = layer.info.decode('ascii')
+					break
+				else:
+					counter += 1
+		except IndexError:
+			pass
+
+		return retval
+		
+	def extract_channel(self, layers):
+		retval = ''
+		counter = 0
+
+		try:
+			while True:
+				layer = layers[counter]
+				if hasattr(layer, "ID") and layer.ID == 3 and layer.len == 1:
+					retval = ord(layer.info)
+					break
+				else:
+					counter += 1
+		except IndexError:
+			pass
+
+		return retval
+
+	def filter_devices(self, sn, rc):
+		retval = {
+			'ap': '',
+			'sta': '',
+		}
+
+		for ap in self.__ACCESSPOINTS:
+			if ap.get('bssid') == sn:
+				retval['ap'] = sn
+				retval['sta'] = rc
+			elif ap.get('bssid') == rc:
+				retval['ap'] = rc
+				retval['sta'] = sn
+
+		return retval
+
+	def get_channel(self, bss):
+		ch = 0
+
+		for ap in self.__ACCESSPOINTS:
+			if ap.get('bssid') == ap:
+				ch = ap.get('channel')
+				break
+
+		return ch				
+
+	def clarify(self, toappend):
+		essid = toappend.get('essid')
+		bssid = toappend.get('bssid')
+
+		if self.essids:
+			if essid in self.essids:
+				if self.aps:
+					if bssid in self.aps:
+						self.__ACCESSPOINTS.append( toappend )
+				else:
+					self.__ACCESSPOINTS.append( toappend )
+		else:
+			if self.aps:
+				if bssid in self.aps:
+					self.__ACCESSPOINTS.append( toappend )
+			else:
+				self.__ACCESSPOINTS.append( toappend )
+
+	def invalid(self, sta):
+		for exception in self.exceptions:
+			if sta.startswith(exception):
+				return True
+
+		return False
+
+	def is_valid_sta(self, sta):
+		if self.stations:
+			if sta in self.stations:
+				return True
+			else:
+				return False
+		else:
+			return True
+
+	def get_crate(self, ch):
+		return
+
+	def filtertify(self, ap, sta):
+		if self.invalid(sta):
+			return
+		else:
+			if ap not in self.filters and sta not in self.filters:
+				if self.is_valid_sta(sta):
+					onrun_form = (ap, sta)
+					if onrun_form not in self.__EXECUTED:
+
+						self.__EXECUTED.append(onrun_form)
+						pkt_form = {
+							'ap': ap,
+							'sta': sta,
+							'channel': self.get_channel(ap),
+						}
+
+						self.__DECPACKETS.append(pkt_form)
+
 	def injector(self, pkt):
 		if pkt.haslayer(Dot11Beacon):
 			try:
@@ -49,7 +168,7 @@ class JAMMER:
 				bssid = pkt.getlayer(Dot11).addr2
 
 			essid = self.extract_essid(pkt.getlayer(Dot11Elt))
-			channel = self.extractc_channel(pkt.getlyer(Dot11Elt))
+			channel = self.extract_channel(pkt.getlayer(Dot11Elt))
 
 			toappend = {
 				'essid': essid,
@@ -57,7 +176,42 @@ class JAMMER:
 				'channel': channel
 			}
 
+			if toappend not in self.__ACCESSPOINTS:
+				self.clarify(
+					toappend
+				)
+
+		else:
+			sender = receiver = ""
+			if pkt.haslayer(Dot11FCS) and pkt.getlayer(Dot11FCS).type == 2 and not pkt.haslayer(EAPOL):
+				sender   = pkt.getlayer(Dot11FCS).addr2
+				receiver = pkt.getlayer(Dot11FCS).addr1
+
+			elif pkt.haslayer(Dot11) and pkt.getlayer(Dot11).type == 2 and not pkt.haslayer(EAPOL):
+				sender   = pkt.getlayer(Dot11).addr2
+				receiver = pkt.getlayer(Dot11).addr1
+
+			if sender and receiver:
+				result  = self.filter_devices(sender, receiver)
+
+				if result.get('ap') and result.get('sta'):
+					self.filtertify(result.get('ap'), result.get('sta'))
+
+	def jammer(self):
+		while True:
+			ch = random.choice(self.channel)
+			subprocess.call(['iwconfig', self.interface, 'channel', str(ch)])
+			time.sleep(0.5)
+
+			crate = self.get_crate(ch)
+
+			time.sleep(0.5)
+
 	def engage(self):
+		t = threading.Thread(target=self.jammer)
+		t.daemon = True
+		t.start()
+
 		sniff(iface=self.interface, prn=self.injector)
 
 class PARSER:
@@ -207,6 +361,7 @@ def main():
 	)
 
 	jammer = JAMMER(parser)
+	jammer.engage()
 
 if __name__ == "__main__":
 	pull = PULL()
