@@ -286,7 +286,15 @@ class JAMMER:
 
 				self.write(ap, sta)
 
+			self.resetter()
+
 			time.sleep(0.5)
+
+	def resetter(self):
+		if self.reset:
+			if len(self.__EXECUTED) >= self.reset:
+				self.__EXECUTED = []
+				self.__DECPACKETS = []
 
 	def engage(self):
 		t = threading.Thread(target=self.jammer)
@@ -311,7 +319,7 @@ class PARSER:
 
 		self.packets     = opts.packets if opts.packets > 0 else pull.halt("Number of packets Must Be >= 1", True, pull.RED)
 		self.delay       = opts.delay   if opts.delay   >= 0 else pull.halt("Delay Interval Must be >= 0", True, pull.RED)
-		self.reset       = opts.reset   if ((opts.reset == 0) or (opts >= 5)) else pull.halt("Reset Must Be >= 5. ")
+		self.reset       = opts.reset   if ((opts.reset == 0) or (opts.reset >= 5)) else pull.halt("Reset Must Be >= 5. ")
 		self.code        = opts.code    if ((opts.code >= 1) and (opts.code <= 66)) else pull.halt("Code Must Be Greater Greater >= 1 and <= 66")
 
 	def exceptions(self, nbroadcast):
