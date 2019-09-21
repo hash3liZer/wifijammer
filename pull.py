@@ -168,6 +168,18 @@ class PULL:
 		if exit:
 			sys.exit(-1)
 
+	def get_mac(self, bss):
+		retval = ''
+
+		if os.path.isfile(os.path.join(os.getcwd(), 'maclist', 'macs.txt')):
+			lines = open(os.path.join(os.getcwd(), 'maclist', 'macs.txt'))
+			for line in lines:
+				line = line.split( " ~ " )
+				if bss.lower().startswith(line[0].lower()[:8]):
+					retval = line[1].split(" ")[0]
+
+		return retval
+
 	def help(self):
 		sys.exit(
 				__help__
