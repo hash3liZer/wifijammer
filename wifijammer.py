@@ -306,6 +306,7 @@ class JAMMER:
 class PARSER:
 
 	def __init__(self, opts):
+		self.help        = self.help(opts.help)
 		self.world       = opts.world
 		self.exceptions  = self.exceptions(opts.nbroadcast)
 		self.verbose     = opts.verbose
@@ -321,6 +322,10 @@ class PARSER:
 		self.delay       = opts.delay   if opts.delay   >= 0 else pull.halt("Delay Interval Must be >= 0", True, pull.RED)
 		self.reset       = opts.reset   if ((opts.reset == 0) or (opts.reset >= 5)) else pull.halt("Reset Must Be >= 5. ")
 		self.code        = opts.code    if ((opts.code >= 1) and (opts.code <= 66)) else pull.halt("Code Must Be Greater Greater >= 1 and <= 66")
+
+	def help(self, _help):
+		if _help:
+			pull.help()
 
 	def exceptions(self, nbroadcast):
 		retval = []
@@ -391,8 +396,9 @@ class PARSER:
 			pull.halt("Interface Not Provided. Specify an Interface!", True, pull.RED)
 
 def main():
-	parser = argparse.ArgumentParser(add_help=True)
+	parser = argparse.ArgumentParser(add_help=False)
 
+	parser.add_argument('-h', '--help'        , dest="help"     , default=False, action="store_true")
 	parser.add_argument('-i', '--interface'   , dest="interface", default="", type=str)
 
 	parser.add_argument('-c', '--channel'     , dest="channel"  , default=0 , type=int)
@@ -400,7 +406,7 @@ def main():
 	parser.add_argument('-s', '--stations'    , dest="stations", default="", type=str)
 	parser.add_argument('-f', '--filters'     , dest="filters" , default="", type=str)
 
-	parser.add_argument('-p', '--packets'     , dest="packets" , default=20 , type=int)
+	parser.add_argument('-p', '--packets'     , dest="packets" , default=25 , type=int)
 	parser.add_argument('-d', '--delay'       , dest="delay"   , default=0.1, type=int)
 	parser.add_argument('-r', '--reset'       , dest="reset"   , default=0  , type=int)
 	parser.add_argument('--code'              , dest="code"    , default=7  , type=int)
