@@ -1,6 +1,5 @@
 # wifijammer
-
-A wireless jammer that send deauthentication frames to dissociate access point and station. Built on scapy and works with Python 3. The jamming will heavily depend on your what kind of wireless adapter you are using. 
+Disconnect Nearby Access Points and Stations by forging and Transmitting Deauthentication Frames. Built on top of scapy and utilizes channel hopping and forging frames from a single interface.  
 
 ## Installation:
 Install Scapy: 
@@ -22,18 +21,36 @@ python wifijammer.py --help
 
 ### Arguments
 ```
-Args                  Description                       Default
- -h, --help           Throwback this help manaul        False
- -i, --interface      Monitor Mode Interface to use.    None  
- -c, --channel        Channel on which to send          Hopping
-                      deauthentication frames
- -e, --essids         Essids to Jam                     None
- -a, --access-points  Mac of Access Points to Jam       None
- -s, --stations       Mac of Stations to Jam            None
- -f, --filters        List of Mac addresses to not Jam. None
-     --verbose        Print Verbose Messages.           False
-
+Args                 Description                       Default
+-h, --help           Throwback this help manaul        False
+-i, --interface      Monitor Mode Interface to use
+                     for scanning & deauthentication   None
+-c, --channel        Channel to put monitor interface
+                     on                                All
+-a, --accesspoints   Comma-seperated list of access-
+                     points to target                  All
+-s, --stations       Comma-seperated list of stations
+                     to target                         All
+-f, --filters        Comma-seperated list of Mac-
+                     addresses to skip target          None
+-p, --packets        Number of deauthentication
+                     packets to send per turn.         25
+-d, --delay          Delay b/w transmission of pkts    0.1s
+-r, --reset          To refresh the target list after 
+                     the list has reached a specific
+                     number, like --reset 5            None
+    --code           (Int) Deauthentication Code
+                     to send with packets               7
+    --world          Scan for channels from 1-14,
+                     default is 1-11                   False
+    --no-broadcast   Don't send deauthentication 
+                     packets to broadcast address      False
+    --verbose        Print device manufacturing
+                     details                           False
 ```
+
+### Disclaimer
+This tool is only intended for testing purposes and should be used where there is allowance of having de-authentication tests. The user should have prior consent for testing against the target. The author will not be held responsible regarding any case of misuse. 
 
 ### Author
 Twitter: <a href="//twitter.com/hash3liZer">hash3liZer</a><br>
