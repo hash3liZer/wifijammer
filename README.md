@@ -1,22 +1,22 @@
 # wifijammer
-Disconnect Nearby Access Points and Stations by forging and Transmitting Deauthentication Frames. Built on top of scapy and utilizes channel hopping and forging frames from a single interface.  
+Disconnect Nearby Access Points and Stations by forging and Transmitting Deauthentication Frames. Built on top of scapy and utilizes channel hopping and forging frames from a single interface. Works with **python 3**.
 
 ## Installation:
 Install Scapy: 
 ```
-$ pip install scapy==2.4.3
+$ pip3 install scapy==2.4.3
 ```
 Clone the Repo and check manual: 
 ```
 $ git clone https://github.com/hash3liZer/wifijammer.git
 $ cd wifijammer/
-$ python wifijammer.py --help
+$ python3 wifijammer.py --help
 ```
 
 ## Usage:
 ```
-python [scriptname] [argument...]
-python wifijammer.py --help
+python3 [scriptname] [argument...]
+python3 wifijammer.py --help
 ```
 
 ### Arguments
