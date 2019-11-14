@@ -19,7 +19,7 @@ Args                 Description                       Default
 -f, --filters        Comma-seperated list of Mac-
                      addresses to skip target          None
 -p, --packets        Number of deauthentication
-                     packets to send per turn.         25
+                     packets to send per turn.         5
 -d, --delay          Delay b/w transmission of pkts    0.1s
 -r, --reset          To refresh the target list after 
                      the list has reached a specific
@@ -28,6 +28,9 @@ Args                 Description                       Default
                      to send with packets               7
     --world          Scan for channels from 1-14,
                      default is 1-11                   False
+    --aggressive     Run in Aggressive Mode. Send 
+                     Continuous frames to Broadcast
+                     Doesn't work when hoppping.        False
     --no-broadcast   Don't send deauthentication 
                      packets to broadcast address      False
     --verbose        Print device manufacturing

