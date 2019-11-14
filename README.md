@@ -43,10 +43,18 @@ Args                 Description                       Default
                      to send with packets               7
     --world          Scan for channels from 1-14,
                      default is 1-11                   False
+    --aggressive     Run in Aggressive Mode. Send 
+                     Continuous frames to Broadcast
+                     Doesn't work when hoppping        False
     --no-broadcast   Don't send deauthentication 
                      packets to broadcast address      False
     --verbose        Print device manufacturing
                      details                           False
+```
+### Example
+Disconnecting AccessPoints from their stations on channel 6:
+```
+$ python3 wifijammer.py --interface wlan1mon --channel 6 --aggressive
 ```
 
 ### Disclaimer
